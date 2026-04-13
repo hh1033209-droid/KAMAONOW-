@@ -6,13 +6,168 @@
     <title>KamaoNow - Earn Real Money</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .toast {
+            position: fixed;
+            bottom: 80px;
+            left: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 12px;
+            border-radius: 12px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 10000;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+        
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 20000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 18px;
+        }
+        .loader {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Withdrawal History Styles */
+        .withdraw-history-container {
+            padding: 10px 0;
+        }
+        .history-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 8px;
+            border-radius: 50px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .history-tab {
+            flex: 1;
+            padding: 10px;
+            background: none;
+            border: none;
+            border-radius: 30px;
+            font-weight: 600;
+            cursor: pointer;
+            color: #666;
+            transition: all 0.3s;
+        }
+        .history-tab.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        .withdrawals-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .withdrawal-card {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+        .withdrawal-card.pending {
+            border-left-color: #f59e0b;
+        }
+        .withdrawal-card.approved {
+            border-left-color: #10b981;
+        }
+        .withdrawal-card.rejected {
+            border-left-color: #ef4444;
+        }
+        .withdrawal-card.processing {
+            border-left-color: #3b82f6;
+        }
+        .withdrawal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .withdrawal-amount {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .withdrawal-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-pending {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        .status-approved {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .status-rejected {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .status-processing {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        .withdrawal-details {
+            font-size: 13px;
+            color: #666;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .withdrawal-details p {
+            margin: 4px 0;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 50px 20px;
+            color: #999;
+        }
+        .empty-state i {
+            font-size: 50px;
+            margin-bottom: 15px;
+            color: #ddd;
+        }
+    </style>
 </head>
 <body>
+
+<div id="toast" class="toast"></div>
 
 <!-- Main App Container -->
 <div id="appContainer" style="display: none;">
     <div class="app-container">
-        <!-- Header -->
         <div class="header">
             <div class="user-info">
                 <i class="fas fa-user-circle"></i>
@@ -20,7 +175,7 @@
                     <span>Welcome back,</span>
                     <h3 id="userName">User</h3>
                 </div>
-                <button class="logout-btn" onclick="logoutUser()">
+                <button class="logout-btn" onclick="window.logoutUser()">
                     <i class="fas fa-sign-out-alt"></i>
                 </button>
             </div>
@@ -33,7 +188,6 @@
             </div>
         </div>
 
-        <!-- Stats Grid -->
         <div class="stats-grid">
             <div class="stat-box">
                 <i class="fas fa-tasks"></i>
@@ -52,26 +206,24 @@
             </div>
         </div>
 
-        <!-- Quick Actions -->
         <div class="quick-actions">
             <h3>Quick Actions</h3>
             <div class="action-buttons">
-                <button class="action-btn" onclick="navigateTo('tasks')">
+                <button class="action-btn" onclick="window.navigateTo('tasks')">
                     <i class="fas fa-check-circle"></i>
                     <span>Do Tasks</span>
                 </button>
-                <button class="action-btn" onclick="navigateTo('earn')">
+                <button class="action-btn" onclick="window.navigateTo('earn')">
                     <i class="fas fa-play-circle"></i>
                     <span>Watch Ads</span>
                 </button>
-                <button class="action-btn" onclick="navigateTo('withdraw')">
+                <button class="action-btn" onclick="window.navigateTo('withdraw')">
                     <i class="fas fa-money-bill-wave"></i>
                     <span>Withdraw</span>
                 </button>
             </div>
         </div>
 
-        <!-- Recent Activities -->
         <div class="recent-activities">
             <h3>Recent Activity</h3>
             <div id="activityList" class="activity-list"></div>
@@ -79,57 +231,53 @@
     </div>
 </div>
 
-<!-- Screen 2: Tasks Screen -->
+<!-- Tasks Screen -->
 <div id="tasksScreen" class="screen">
     <div class="screen-header">
-        <button class="back-btn" onclick="navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
+        <button class="back-btn" onclick="window.navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
         <h2>Daily Tasks</h2>
         <div></div>
     </div>
     <div id="tasksList" class="tasks-container"></div>
 </div>
 
-<!-- Screen 3: Earn Screen -->
+<!-- Earn Screen -->
 <div id="earnScreen" class="screen">
     <div class="screen-header">
-        <button class="back-btn" onclick="navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
+        <button class="back-btn" onclick="window.navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
         <h2>Watch & Earn</h2>
         <div></div>
     </div>
     <div class="ads-container">
-        <div class="ad-card" onclick="watchAd('normal')">
+        <div class="ad-card" onclick="window.watchAd('normal')">
             <i class="fas fa-play-circle"></i>
             <h3>Watch Video Ad</h3>
             <p>10 seconds • Earn ₨ 5</p>
             <span class="ad-reward">+₨5</span>
         </div>
-        <div class="ad-card" onclick="watchAd('rewarded')">
+        <div class="ad-card" onclick="window.watchAd('rewarded')">
             <i class="fas fa-gem"></i>
             <h3>Rewarded Ad</h3>
-            <p>30 seconds • Double rewards!</p>
+            <p>30 seconds • Earn ₨ 15</p>
             <span class="ad-reward">+₨15</span>
         </div>
-        <div class="ad-card" onclick="watchAd('special')">
+        <div class="ad-card" onclick="window.watchAd('special')">
             <i class="fas fa-gift"></i>
             <h3>Special Offer</h3>
-            <p>60 seconds • Big bonus!</p>
+            <p>60 seconds • Earn ₨ 50</p>
             <span class="ad-reward">+₨50</span>
         </div>
     </div>
     <div class="daily-bonus">
         <h3>Daily Bonus</h3>
-        <div class="bonus-timer">
-            <i class="fas fa-calendar-day"></i>
-            <span>Claim once per day</span>
-        </div>
-        <button class="claim-btn" onclick="claimDailyBonus()">Claim Daily Bonus</button>
+        <button class="claim-btn" onclick="window.claimDailyBonus()">Claim Daily Bonus</button>
     </div>
 </div>
 
-<!-- Screen 4: Withdraw Screen -->
+<!-- Withdraw Screen -->
 <div id="withdrawScreen" class="screen">
     <div class="screen-header">
-        <button class="back-btn" onclick="navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
+        <button class="back-btn" onclick="window.navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
         <h2>Withdraw Money</h2>
         <div></div>
     </div>
@@ -140,17 +288,17 @@
         </div>
         <div class="withdraw-methods">
             <h3>Select Method</h3>
-            <div class="method-option" onclick="selectWithdrawalMethod('jazzcash')">
+            <div class="method-option" onclick="window.selectWithdrawalMethod('jazzcash')">
                 <i class="fas fa-mobile-alt"></i>
                 <span>JazzCash</span>
                 <i class="fas fa-check-circle method-check"></i>
             </div>
-            <div class="method-option" onclick="selectWithdrawalMethod('easypaisa')">
+            <div class="method-option" onclick="window.selectWithdrawalMethod('easypaisa')">
                 <i class="fas fa-mobile-alt"></i>
                 <span>EasyPaisa</span>
                 <i class="fas fa-check-circle method-check"></i>
             </div>
-            <div class="method-option" onclick="selectWithdrawalMethod('upaisa')">
+            <div class="method-option" onclick="window.selectWithdrawalMethod('upaisa')">
                 <i class="fas fa-university"></i>
                 <span>UPaisa</span>
                 <i class="fas fa-check-circle method-check"></i>
@@ -159,16 +307,45 @@
         <div class="withdraw-input">
             <label>Amount (Min ₨ 200)</label>
             <input type="number" id="withdrawAmount" placeholder="Enter amount">
-            <input type="text" id="accountNumber" placeholder="Account Number / Mobile No.">
-            <button class="withdraw-btn" onclick="requestWithdrawal()">Request Withdrawal</button>
+            <input type="text" id="accountNumber" placeholder="Account Number">
+            <button class="withdraw-btn" onclick="window.requestWithdrawal()">Request Withdrawal</button>
         </div>
     </div>
 </div>
 
-<!-- Screen 5: Refer Screen -->
+<!-- ========== WITHDRAWAL HISTORY SCREEN (NEW) ========== -->
+<div id="withdrawHistoryScreen" class="screen">
+    <div class="screen-header">
+        <button class="back-btn" onclick="window.navigateTo('withdraw')">
+            <i class="fas fa-arrow-left"></i>
+        </button>
+        <h2>Withdrawal History</h2>
+        <div></div>
+    </div>
+    
+    <div class="withdraw-history-container">
+        <!-- Tabs for filtering -->
+        <div class="history-tabs">
+            <button class="history-tab active" onclick="window.filterWithdrawals('all')">All</button>
+            <button class="history-tab" onclick="window.filterWithdrawals('pending')">Pending</button>
+            <button class="history-tab" onclick="window.filterWithdrawals('approved')">Approved</button>
+            <button class="history-tab" onclick="window.filterWithdrawals('rejected')">Rejected</button>
+        </div>
+        
+        <!-- Withdrawals List -->
+        <div id="withdrawalsList" class="withdrawals-list">
+            <div class="empty-state">
+                <i class="fas fa-clock"></i>
+                <p>No withdrawal requests yet</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Refer Screen -->
 <div id="referScreen" class="screen">
     <div class="screen-header">
-        <button class="back-btn" onclick="navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
+        <button class="back-btn" onclick="window.navigateTo('home')"><i class="fas fa-arrow-left"></i></button>
         <h2>Refer & Earn</h2>
         <div></div>
     </div>
@@ -187,15 +364,15 @@
             <p>Your Referral Link</p>
             <div class="link-display">
                 <span id="referralLink">Loading...</span>
-                <button onclick="copyReferralLink()"><i class="fas fa-copy"></i></button>
+                <button onclick="window.copyReferralLink()"><i class="fas fa-copy"></i></button>
             </div>
         </div>
         <div class="refer-info">
             <h3>How it works?</h3>
             <ul>
-                <li><i class="fas fa-user-plus"></i> Invite friends to join KamaoNow</li>
-                <li><i class="fas fa-percent"></i> Get 15% of their earnings forever!</li>
-                <li><i class="fas fa-trophy"></i> Earn bonus on 5, 10, 20 referrals</li>
+                <li><i class="fas fa-user-plus"></i> Invite friends to join</li>
+                <li><i class="fas fa-percent"></i> Get 15% of their earnings</li>
+                <li><i class="fas fa-trophy"></i> Earn bonus on referrals</li>
             </ul>
         </div>
     </div>
@@ -203,25 +380,23 @@
 
 <!-- Bottom Navigation -->
 <div class="bottom-nav">
-    <div class="nav-item" onclick="navigateTo('home')">
-        <i class="fas fa-home"></i>
-        <span>Home</span>
+    <div class="nav-item" onclick="window.navigateTo('home')">
+        <i class="fas fa-home"></i><span>Home</span>
     </div>
-    <div class="nav-item" onclick="navigateTo('tasks')">
-        <i class="fas fa-tasks"></i>
-        <span>Tasks</span>
+    <div class="nav-item" onclick="window.navigateTo('tasks')">
+        <i class="fas fa-tasks"></i><span>Tasks</span>
     </div>
-    <div class="nav-item" onclick="navigateTo('earn')">
-        <i class="fas fa-play-circle"></i>
-        <span>Earn</span>
+    <div class="nav-item" onclick="window.navigateTo('earn')">
+        <i class="fas fa-play-circle"></i><span>Earn</span>
     </div>
-    <div class="nav-item" onclick="navigateTo('withdraw')">
-        <i class="fas fa-money-bill-wave"></i>
-        <span>Withdraw</span>
+    <div class="nav-item" onclick="window.navigateTo('withdraw')">
+        <i class="fas fa-money-bill-wave"></i><span>Withdraw</span>
     </div>
-    <div class="nav-item" onclick="navigateTo('refer')">
-        <i class="fas fa-users"></i>
-        <span>Refer</span>
+    <div class="nav-item" onclick="window.navigateTo('withdrawHistory')">
+        <i class="fas fa-history"></i><span>History</span>
+    </div>
+    <div class="nav-item" onclick="window.navigateTo('refer')">
+        <i class="fas fa-users"></i><span>Refer</span>
     </div>
 </div>
 
@@ -229,30 +404,58 @@
 <div id="authModal" class="auth-modal">
     <div class="auth-container">
         <div class="auth-tabs">
-            <button class="tab-btn active" onclick="switchAuthTab('login')">Login</button>
-            <button class="tab-btn" onclick="switchAuthTab('register')">Register</button>
+            <button class="tab-btn active" onclick="window.switchAuthTab('login')">Login</button>
+            <button class="tab-btn" onclick="window.switchAuthTab('register')">Register</button>
         </div>
-        
         <div id="loginForm" class="auth-form active">
             <h2>Welcome Back!</h2>
-            <input type="email" id="loginEmail" placeholder="Email Address" required>
-            <input type="password" id="loginPassword" placeholder="Password" required>
-            <button onclick="loginUser()">Login</button>
-            <p>Don't have an account? <span onclick="switchAuthTab('register')">Register</span></p>
+            <input type="email" id="loginEmail" placeholder="Email">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button onclick="window.loginUser()">Login</button>
         </div>
-        
         <div id="registerForm" class="auth-form">
             <h2>Create Account</h2>
-            <input type="text" id="regName" placeholder="Full Name" required>
-            <input type="email" id="regEmail" placeholder="Email Address" required>
-            <input type="password" id="regPassword" placeholder="Password (min 6 chars)" required>
-            <input type="password" id="regConfirmPassword" placeholder="Confirm Password" required>
-            <button onclick="registerUser()">Register</button>
-            <p>Already have an account? <span onclick="switchAuthTab('login')">Login</span></p>
+            <input type="text" id="regName" placeholder="Full Name">
+            <input type="email" id="regEmail" placeholder="Email">
+            <input type="password" id="regPassword" placeholder="Password (min 6)">
+            <input type="password" id="regConfirmPassword" placeholder="Confirm Password">
+            <button onclick="window.registerUser()">Register</button>
         </div>
     </div>
 </div>
 
-<script type="module" src="main.js"></script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, increment, arrayUnion, onSnapshot, addDoc } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
+    
+    const firebaseConfig = {
+        apiKey: "AIzaSyBsny5xLAKyeFWBf1De4WKTfuNuzy5UIoA",
+        authDomain: "kamaonow-bf070.firebaseapp.com",
+        projectId: "kamaonow-bf070",
+        storageBucket: "kamaonow-bf070.firebasestorage.app",
+        messagingSenderId: "107731628902",
+        appId: "1:107731628902:web:b9d36a0698995385124ea7",
+        measurementId: "G-PL3GZTWPT4"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    
+    console.log("✅ Firebase Connected!", db);
+    
+    window.db = db;
+    window.firestoreHelpers = { 
+        collection, doc, setDoc, getDoc, getDocs, query, 
+        where, updateDoc, increment, arrayUnion, onSnapshot, 
+        addDoc
+    };
+    
+    // Load main app logic
+    const script = document.createElement('script');
+    script.src = 'main.js';
+    script.type = 'module';
+    document.body.appendChild(script);
+</script>
+
 </body>
 </html>
