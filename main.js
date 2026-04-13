@@ -1,4 +1,4 @@
-// ========== KAMAONOW PRODUCTION VERSION - FINAL ==========
+// ========== KAMAONOW PRODUCTION VERSION - FINAL WITH REFERRAL FIX ==========
 console.log("🚀 KamaoNow Production Mode Loading...");
 
 // ========== GLOBAL VARIABLES ==========
@@ -16,6 +16,18 @@ let appData = {
     streak: 1,
     activities: []
 };
+
+// ========== REFERRAL LINK UPDATE FUNCTION (NEW) ==========
+function updateReferralLink() {
+    const linkEl = document.getElementById('referralLink');
+    if (linkEl) {
+        if (currentUser && currentUser.userId) {
+            linkEl.innerText = `https://kamaonow.com/ref/${currentUser.userId}`;
+        } else {
+            linkEl.innerText = "Please login to get your referral link";
+        }
+    }
+}
 
 // ========== COMPLETE TASK WITH VERIFICATION ==========
 window.completeTask = async function(taskId, taskName, reward) {
@@ -599,7 +611,7 @@ async function loadUserData(userId) {
     }
 }
 
-// ========== LOGIN FUNCTION ==========
+// ========== LOGIN FUNCTION (UPDATED) ==========
 window.loginUser = async function() {
     const email = document.getElementById('loginEmail')?.value;
     const password = document.getElementById('loginPassword')?.value;
@@ -643,10 +655,8 @@ window.loginUser = async function() {
         document.getElementById('appContainer').style.display = 'block';
         document.getElementById('userName').innerText = currentUser.name;
         
-        const linkEl = document.getElementById('referralLink');
-        if (linkEl) {
-            linkEl.innerText = `https://kamaonow.com/ref/${currentUser.userId}`;
-        }
+        // 🔥 UPDATE REFERRAL LINK AFTER LOGIN 🔥
+        updateReferralLink();
         
         showToast(`✅ Welcome back, ${currentUser.name}!`, "success");
         
@@ -751,6 +761,7 @@ window.logoutUser = function() {
     showToast("Logged out successfully!", "success");
 };
 
+// ========== NAVIGATE TO FUNCTION (UPDATED) ==========
 window.navigateTo = function(screen) {
     const screens = ['home', 'tasks', 'earn', 'withdraw', 'refer', 'withdrawHistory'];
     screens.forEach(s => {
@@ -761,6 +772,11 @@ window.navigateTo = function(screen) {
     
     if (screen === 'withdrawHistory') {
         loadWithdrawalHistory();
+    }
+    
+    // 🔥 UPDATE REFERRAL LINK WHEN REFER SCREEN OPENS 🔥
+    if (screen === 'refer') {
+        updateReferralLink();
     }
     
     const navItems = document.querySelectorAll('.nav-item');
@@ -790,9 +806,13 @@ window.switchAuthTab = function(tab) {
 };
 
 window.copyReferralLink = function() {
-    const link = `https://kamaonow.com/ref/${currentUser?.userId || 'guest'}`;
+    if (!currentUser) {
+        showToast("Please login first to get your referral link!", "error");
+        return;
+    }
+    const link = `https://kamaonow.com/ref/${currentUser.userId}`;
     navigator.clipboard.writeText(link);
-    showToast("Referral link copied!", "success");
+    showToast("Referral link copied! Share with friends!", "success");
 };
 
 // ========== CHECK SAVED USER ==========
@@ -803,10 +823,11 @@ if (savedUser) {
     document.getElementById('appContainer').style.display = 'block';
     document.getElementById('userName').innerText = currentUser.name;
     loadUserData(currentUser.userId);
+    updateReferralLink(); // 🔥 ADDED
 }
 
 setInterval(() => {
     if (currentUser) checkPendingItems();
 }, 30000);
 
-console.log("✅ KamaoNow Production Mode Ready - Withdrawal History Working!");
+console.log("✅ KamaoNow Production Mode Ready - Referral Link Fixed!");
