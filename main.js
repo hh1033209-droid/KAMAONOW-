@@ -1,406 +1,362 @@
-// ========== FIREBASE IMPORT ==========
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
-import { 
-    getFirestore, 
-    collection, 
-    doc, 
-    setDoc, 
-    getDoc, 
-    getDocs, 
-    query, 
-    where,
-    updateDoc,
-    increment,
-    arrayUnion,
-    onSnapshot
-} from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
-
-// ========== YOUR FIREBASE CONFIG ==========
-const firebaseConfig = {
-    apiKey: "AIzaSyBxNjS-VXmSvW5I_qzO7b5uqtdePVblg7w",
-    authDomain: "kamaonow-1b9de.firebaseapp.com",
-    databaseURL: "https://kamaonow-1b9de-default-rtdb.firebaseio.com",
-    projectId: "kamaonow-1b9de",
-    storageBucket: "kamaonow-1b9de.firebasestorage.app",
-    messagingSenderId: "575126602800",
-    appId: "1:575126602800:web:652669db780878eff999f5",
-    measurementId: "G-YWW0C89LKE"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-console.log("🔥 KamaoNow Connected to Firebase!");
+// ========== KAMAONOW PRODUCTION VERSION - FINAL ==========
+console.log("🚀 KamaoNow Production Mode Loading...");
 
 // ========== GLOBAL VARIABLES ==========
 let currentUser = null;
+let selectedMethod = null;
+let currentFilter = 'all';
+let allWithdrawals = [];
+
 let appData = {
     balance: 0,
-    tasksCompletedToday: 0,
+    pendingTasks: [],
+    pendingWithdrawals: [],
+    completedTasks: [],
     referrals: 0,
     streak: 1,
-    tasks: [],
-    activities: [],
-    lastAdTime: 0
+    activities: []
 };
 
-let selectedWithdrawalMethod = null;
-
-// ========== DEFAULT TASKS ==========
-const defaultTasks = [
-    { id: 1, name: "Complete Profile", description: "Fill your profile details", reward: 50, category: "easy", active: true, icon: "fa-user-edit" },
-    { id: 2, name: "Follow on Instagram", description: "Follow @kamaonow", reward: 30, category: "social", active: true, icon: "fa-instagram" },
-    { id: 3, name: "Join Telegram Channel", description: "Join our Telegram group", reward: 40, category: "social", active: true, icon: "fa-telegram" },
-    { id: 4, name: "Like Facebook Page", description: "Like KamaoNow on FB", reward: 25, category: "social", active: true, icon: "fa-facebook" },
-    { id: 5, name: "Rate 5 Stars", description: "Rate us on Play Store", reward: 45, category: "easy", active: true, icon: "fa-star" },
-    { id: 6, name: "Share on WhatsApp", description: "Share with 5 friends", reward: 60, category: "social", active: true, icon: "fa-whatsapp" },
-    { id: 7, name: "Daily Check-in", description: "Claim your daily reward", reward: 20, category: "daily", active: true, icon: "fa-gift" }
-];
-
-// ========== AUTH FUNCTIONS ==========
-async function checkAuth() {
-    const savedUser = localStorage.getItem('kamaoNow_user');
-    if (savedUser) {
-        currentUser = JSON.parse(savedUser);
-        await loadUserData(currentUser.userId);
-        document.getElementById('authModal').style.display = 'none';
-        document.getElementById('appContainer').style.display = 'block';
-        startRealtimeListeners();
-        return true;
-    } else {
-        document.getElementById('authModal').style.display = 'flex';
-        document.getElementById('appContainer').style.display = 'none';
-        return false;
-    }
-}
-
-async function registerUser() {
-    const name = document.getElementById('regName')?.value;
-    const email = document.getElementById('regEmail')?.value;
-    const password = document.getElementById('regPassword')?.value;
-    const confirmPassword = document.getElementById('regConfirmPassword')?.value;
-    
-    if (!name || !email || !password) {
-        showToast('Please fill all fields!', 'error');
+// ========== COMPLETE TASK WITH VERIFICATION ==========
+window.completeTask = async function(taskId, taskName, reward) {
+    if (!currentUser) {
+        showToast("Please login first!", "error");
         return;
     }
     
-    if (password !== confirmPassword) {
-        showToast('Passwords do not match!', 'error');
+    if (appData.completedTasks.includes(taskId)) {
+        showToast("Task already completed!", "error");
         return;
     }
     
-    if (password.length < 6) {
-        showToast('Password must be at least 6 characters!', 'error');
+    const proof = prompt(`📸 Task: ${taskName}\n\nPaste your proof (image link or description):`);
+    if (!proof || proof.trim() === "") {
+        showToast("Proof required to complete task!", "error");
         return;
     }
     
-    showLoading('Creating account...');
+    showLoading("Submitting for verification...");
     
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email));
-        const querySnapshot = await getDocs(q);
+        const { collection, addDoc } = window.firestoreHelpers;
+        const db = window.db;
         
-        if (!querySnapshot.empty) {
-            showToast('Email already registered!', 'error');
-            hideLoading();
-            return;
-        }
-        
-        const userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-        const userData = {
-            userId: userId,
-            name: name,
-            email: email,
-            password: btoa(password),
-            balance: 100,
-            tasksCompletedToday: 0,
-            totalTasksCompleted: 0,
-            referrals: 0,
-            referralEarnings: 0,
-            streak: 1,
-            lastLogin: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            status: 'active',
-            completedTasks: []
-        };
-        
-        await setDoc(doc(db, 'users', userId), userData);
-        
-        currentUser = { userId: userId, name: name, email: email };
-        localStorage.setItem('kamaoNow_user', JSON.stringify(currentUser));
-        
-        await loadUserData(userId);
-        
-        showToast('✅ Account created successfully!', 'success');
-        document.getElementById('authModal').style.display = 'none';
-        document.getElementById('appContainer').style.display = 'block';
-        
-        startRealtimeListeners();
-        
-    } catch (error) {
-        console.error('Register error:', error);
-        showToast('Registration failed!', 'error');
-    }
-    hideLoading();
-}
-
-async function loginUser() {
-    const email = document.getElementById('loginEmail')?.value;
-    const password = document.getElementById('loginPassword')?.value;
-    
-    if (!email || !password) {
-        showToast('Please enter email and password!', 'error');
-        return;
-    }
-    
-    showLoading('Logging in...');
-    
-    try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email));
-        const querySnapshot = await getDocs(q);
-        
-        if (querySnapshot.empty) {
-            showToast('User not found! Please register.', 'error');
-            hideLoading();
-            return;
-        }
-        
-        let userData = null;
-        querySnapshot.forEach((doc) => { userData = doc.data(); });
-        
-        if (btoa(password) !== userData.password) {
-            showToast('Wrong password!', 'error');
-            hideLoading();
-            return;
-        }
-        
-        if (userData.status === 'banned') {
-            showToast('Your account has been banned!', 'error');
-            hideLoading();
-            return;
-        }
-        
-        currentUser = { userId: userData.userId, name: userData.name, email: userData.email };
-        localStorage.setItem('kamaoNow_user', JSON.stringify(currentUser));
-        
-        await loadUserData(userData.userId);
-        
-        await updateDoc(doc(db, 'users', userData.userId), {
-            lastLogin: new Date().toISOString()
+        await addDoc(collection(db, 'task_requests'), {
+            userId: currentUser.userId,
+            userName: currentUser.name,
+            taskId: taskId,
+            taskName: taskName,
+            reward: reward,
+            proof: proof,
+            status: 'pending',
+            submittedAt: new Date().toISOString()
         });
         
-        showToast(`Welcome back, ${userData.name}!`, 'success');
-        document.getElementById('authModal').style.display = 'none';
-        document.getElementById('appContainer').style.display = 'block';
-        
-        startRealtimeListeners();
+        showToast("✅ Task submitted! Admin will verify within 24 hours.", "success");
+        addActivity(`📝 Submitted "${taskName}" for verification`);
         
     } catch (error) {
-        console.error('Login error:', error);
-        showToast('Login failed!', 'error');
+        console.error(error);
+        showToast("Failed to submit task!", "error");
     }
     hideLoading();
-}
+};
 
-function logoutUser() {
-    localStorage.removeItem('kamaoNow_user');
-    currentUser = null;
-    document.getElementById('authModal').style.display = 'flex';
-    document.getElementById('appContainer').style.display = 'none';
-    showToast('Logged out successfully!', 'success');
-}
-
-// ========== LOAD USER DATA ==========
-async function loadUserData(userId) {
+// ========== WITHDRAWAL REQUEST ==========
+window.requestWithdrawal = async function() {
+    console.log("💰 Withdrawal button clicked");
+    
+    if (!currentUser) {
+        showToast("Please login first!", "error");
+        return;
+    }
+    
+    const amount = parseInt(document.getElementById('withdrawAmount')?.value);
+    const account = document.getElementById('accountNumber')?.value;
+    const method = selectedMethod;
+    
+    console.log("Method selected:", method);
+    console.log("Amount:", amount);
+    console.log("Account:", account);
+    
+    if (!method) {
+        showToast("Please select a withdrawal method (JazzCash/EasyPaisa/UPaisa)!", "error");
+        return;
+    }
+    if (!amount || amount < 200) {
+        showToast("Minimum withdrawal amount is ₨200!", "error");
+        return;
+    }
+    if (!account || account.trim() === "") {
+        showToast("Please enter account number!", "error");
+        return;
+    }
+    if (amount > appData.balance) {
+        showToast(`Insufficient balance! Your balance: ₨${appData.balance}`, "error");
+        return;
+    }
+    
+    showLoading("Submitting withdrawal request...");
+    
     try {
-        const userRef = doc(db, 'users', userId);
-        const docSnap = await getDoc(userRef);
+        const { collection, addDoc } = window.firestoreHelpers;
+        const db = window.db;
         
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            appData.balance = data.balance || 0;
-            appData.tasksCompletedToday = data.tasksCompletedToday || 0;
-            appData.referrals = data.referrals || 0;
-            appData.referralEarnings = data.referralEarnings || 0;
-            appData.streak = data.streak || 1;
-            appData.completedTasks = data.completedTasks || [];
+        let methodDisplay = "";
+        if (method === 'jazzcash') methodDisplay = "JazzCash";
+        else if (method === 'easypaisa') methodDisplay = "EasyPaisa";
+        else if (method === 'upaisa') methodDisplay = "UPaisa";
+        
+        await addDoc(collection(db, 'withdrawal_requests'), {
+            userId: currentUser.userId,
+            userName: currentUser.name,
+            amount: amount,
+            method: method,
+            methodDisplay: methodDisplay,
+            accountNumber: account,
+            status: 'pending',
+            requestedAt: new Date().toISOString()
+        });
+        
+        showToast(`✅ Withdrawal request of ₨${amount} submitted via ${methodDisplay}!`, "success");
+        addActivity(`💰 Requested withdrawal of ₨${amount} via ${methodDisplay}`);
+        
+        if (document.getElementById('withdrawHistoryScreen').classList.contains('active')) {
+            loadWithdrawalHistory();
         }
         
-        document.getElementById('userName').innerText = currentUser?.name || 'User';
-        
-        const tasksRef = collection(db, 'tasks');
-        const tasksSnapshot = await getDocs(tasksRef);
-        
-        if (!tasksSnapshot.empty) {
-            appData.tasks = [];
-            tasksSnapshot.forEach((doc) => {
-                const task = doc.data();
-                task.id = parseInt(doc.id);
-                task.completed = appData.completedTasks?.includes(task.id) || false;
-                appData.tasks.push(task);
-            });
-        } else {
-            for (const task of defaultTasks) {
-                await setDoc(doc(db, 'tasks', task.id.toString()), task);
-                task.completed = appData.completedTasks?.includes(task.id) || false;
-                appData.tasks.push(task);
-            }
-        }
-        
-        updateAllUI();
+        document.getElementById('withdrawAmount').value = '';
+        document.getElementById('accountNumber').value = '';
+        document.querySelectorAll('.method-option').forEach(opt => opt.classList.remove('selected'));
+        selectedMethod = null;
         
     } catch (error) {
-        console.error('Load user data error:', error);
+        console.error(error);
+        showToast("Failed to submit request: " + error.message, "error");
     }
-}
+    hideLoading();
+};
 
-// ========== REAL-TIME LISTENERS ==========
-function startRealtimeListeners() {
+// ========== SELECT WITHDRAWAL METHOD ==========
+window.selectWithdrawalMethod = function(method) {
+    selectedMethod = method;
+    console.log("Method selected:", method);
+    
+    document.querySelectorAll('.method-option').forEach(opt => {
+        opt.classList.remove('selected');
+    });
+    
+    if (event && event.currentTarget) {
+        event.currentTarget.classList.add('selected');
+    }
+    
+    let methodName = "";
+    if (method === 'jazzcash') methodName = "JazzCash";
+    else if (method === 'easypaisa') methodName = "EasyPaisa";
+    else if (method === 'upaisa') methodName = "UPaisa";
+    
+    showToast(`Selected: ${methodName}`, "success");
+};
+
+// ========== WITHDRAWAL HISTORY FUNCTIONS ==========
+
+async function loadWithdrawalHistory() {
     if (!currentUser) return;
     
-    const userRef = doc(db, 'users', currentUser.userId);
-    onSnapshot(userRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            appData.balance = data.balance;
-            appData.tasksCompletedToday = data.tasksCompletedToday;
-            updateBalanceUI();
+    try {
+        const { collection, query, where, getDocs } = window.firestoreHelpers;
+        const db = window.db;
+        
+        const withdrawalsRef = collection(db, 'withdrawal_requests');
+        const q = query(withdrawalsRef, where('userId', '==', currentUser.userId));
+        const snapshot = await getDocs(q);
+        
+        allWithdrawals = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            let status = data.status || 'pending';
+            if (status === 'successful') {
+                status = 'approved';
+            }
+            allWithdrawals.push({
+                id: doc.id,
+                amount: data.amount,
+                method: data.method,
+                methodDisplay: data.methodDisplay || data.method,
+                accountNumber: data.accountNumber,
+                status: status,
+                requestedAt: data.requestedAt,
+                date: data.requestedAt ? new Date(data.requestedAt).toLocaleDateString() : new Date().toLocaleDateString(),
+                time: data.requestedAt ? new Date(data.requestedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
+            });
+        });
+        
+        allWithdrawals.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+        renderWithdrawals();
+        
+    } catch (error) {
+        console.error("Failed to load withdrawals:", error);
+    }
+}
+
+window.filterWithdrawals = function(status) {
+    currentFilter = status;
+    
+    document.querySelectorAll('.history-tab').forEach(tab => {
+        tab.classList.remove('active');
+        const tabText = tab.textContent.toLowerCase().trim();
+        if (status === 'all' && tabText === 'all') {
+            tab.classList.add('active');
+        } else if (tabText === status) {
+            tab.classList.add('active');
         }
     });
     
-    const tasksRef = collection(db, 'tasks');
-    onSnapshot(tasksRef, (snapshot) => {
-        const updatedTasks = [];
-        snapshot.forEach((doc) => {
-            const task = doc.data();
-            task.id = parseInt(doc.id);
-            task.completed = appData.completedTasks?.includes(task.id) || false;
-            updatedTasks.push(task);
-        });
-        appData.tasks = updatedTasks;
-        updateTasksUI();
-    });
-}
+    renderWithdrawals();
+};
 
-// ========== TASK FUNCTIONS ==========
-async function completeTask(taskId) {
-    const task = appData.tasks.find(t => t.id === taskId);
+function renderWithdrawals() {
+    const container = document.getElementById('withdrawalsList');
+    if (!container) return;
     
-    if (!task) { showToast('Task not found!', 'error'); return; }
-    if (task.completed) { showToast('Task already completed!', 'error'); return; }
-    if (appData.tasksCompletedToday >= 20) { showToast('Daily task limit reached!', 'error'); return; }
-    
-    showLoading('Verifying task...');
-    await new Promise(r => setTimeout(r, 1500));
-    
-    try {
-        const userRef = doc(db, 'users', currentUser.userId);
-        await updateDoc(userRef, {
-            balance: increment(task.reward),
-            tasksCompletedToday: increment(1),
-            totalTasksCompleted: increment(1),
-            completedTasks: arrayUnion(task.id)
-        });
-        
-        addActivity(`✅ Completed "${task.name}" and earned ₨${task.reward}`);
-        task.completed = true;
-        appData.balance += task.reward;
-        appData.tasksCompletedToday++;
-        
-        updateAllUI();
-        showToast(`🎉 +₨${task.reward} earned!`, 'success');
-        
-    } catch (error) {
-        console.error('Complete task error:', error);
-        showToast('Failed to complete task!', 'error');
+    let filtered = allWithdrawals;
+    if (currentFilter !== 'all') {
+        filtered = allWithdrawals.filter(w => w.status === currentFilter);
     }
-    hideLoading();
-}
-
-// ========== AD FUNCTIONS ==========
-function watchAd(adType) {
-    const now = Date.now();
-    if (now - appData.lastAdTime < 30000 && appData.lastAdTime !== 0) {
-        showToast(`Wait ${Math.ceil(30 - (now - appData.lastAdTime)/1000)} seconds`, 'error');
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-history"></i>
+                <p>No ${currentFilter !== 'all' ? currentFilter : ''} withdrawal requests found</p>
+                <small>Your withdrawal history will appear here</small>
+            </div>
+        `;
         return;
     }
     
-    let duration = 10, reward = 5, message = 'Watch ad to earn ₨5';
-    if (adType === 'rewarded') { duration = 30; reward = 15; message = 'Watch rewarded ad - Earn ₨15!'; }
-    if (adType === 'special') { duration = 60; reward = 50; message = 'Special offer - Earn ₨50!'; }
+    container.innerHTML = '';
     
-    showAdTimer(duration, reward, message);
-}
-
-function showAdTimer(duration, reward, message) {
-    let timeLeft = duration;
-    const overlay = document.createElement('div');
-    overlay.className = 'ad-overlay';
-    overlay.innerHTML = `
-        <i class="fas fa-play-circle" style="font-size: 80px; margin-bottom: 20px; color: #667eea;"></i>
-        <h2>${message}</h2>
-        <div style="font-size: 48px; font-weight: bold; margin: 20px;" id="adTimer">${timeLeft}</div>
-        <div style="width: 80%; height: 8px; background: rgba(255,255,255,0.2); border-radius: 10px;">
-            <div id="adProgress" style="width: 0%; height: 100%; background: #10b981;"></div>
-        </div>
-        <p style="margin-top: 20px;">Don't close this window</p>
-    `;
-    document.body.appendChild(overlay);
-    
-    const interval = setInterval(async () => {
-        timeLeft--;
-        const timerEl = document.getElementById('adTimer');
-        const progressEl = document.getElementById('adProgress');
-        if (timerEl) timerEl.innerText = timeLeft;
-        if (progressEl) progressEl.style.width = `${((duration - timeLeft) / duration) * 100}%`;
+    filtered.forEach(withdrawal => {
+        let methodIcon = "fa-mobile-alt";
+        if (withdrawal.method === 'jazzcash') methodIcon = "fa-mobile-alt";
+        else if (withdrawal.method === 'easypaisa') methodIcon = "fa-mobile-alt";
+        else if (withdrawal.method === 'upaisa') methodIcon = "fa-university";
         
-        if (timeLeft < 0) {
-            clearInterval(interval);
-            overlay.remove();
-            await completeAdWatch(reward);
+        let statusText = "";
+        let statusIcon = "";
+        let statusClass = "";
+        
+        if (withdrawal.status === 'approved') {
+            statusText = "Approved";
+            statusIcon = "fa-check-circle";
+            statusClass = "approved";
+        } else if (withdrawal.status === 'pending') {
+            statusText = "Pending";
+            statusIcon = "fa-clock";
+            statusClass = "pending";
+        } else if (withdrawal.status === 'rejected') {
+            statusText = "Rejected";
+            statusIcon = "fa-times-circle";
+            statusClass = "rejected";
+        } else {
+            statusText = withdrawal.status.charAt(0).toUpperCase() + withdrawal.status.slice(1);
+            statusIcon = "fa-question-circle";
+            statusClass = "pending";
         }
-    }, 1000);
+        
+        const card = document.createElement('div');
+        card.className = `withdrawal-card ${statusClass}`;
+        card.innerHTML = `
+            <div class="withdrawal-header">
+                <div class="withdrawal-amount">
+                    <i class="fas fa-rupee-sign"></i> ${withdrawal.amount}
+                </div>
+                <div class="withdrawal-status status-${statusClass}">
+                    <i class="fas ${statusIcon}"></i> ${statusText}
+                </div>
+            </div>
+            <div class="withdrawal-details">
+                <p><i class="fas ${methodIcon}"></i> ${withdrawal.methodDisplay || withdrawal.method}</p>
+                <p><i class="fas fa-user"></i> Account: ${withdrawal.accountNumber || 'N/A'}</p>
+                <p><i class="fas fa-calendar"></i> Date: ${withdrawal.date}</p>
+                <p><i class="fas fa-clock"></i> Time: ${withdrawal.time}</p>
+        `;
+        
+        if (withdrawal.status === 'approved') {
+            card.innerHTML += '<p class="approved-text"><i class="fas fa-check-circle"></i> ✅ Amount sent to your account</p>';
+        } else if (withdrawal.status === 'rejected') {
+            card.innerHTML += '<p class="rejected-text"><i class="fas fa-exclamation-circle"></i> ❌ Request rejected. Contact support.</p>';
+        } else if (withdrawal.status === 'pending') {
+            card.innerHTML += '<p class="pending-text"><i class="fas fa-hourglass-half"></i> ⏳ Admin will process within 48 hours</p>';
+        }
+        
+        card.innerHTML += `</div>`;
+        container.appendChild(card);
+    });
 }
 
-async function completeAdWatch(reward) {
-    appData.lastAdTime = Date.now();
-    try {
-        const userRef = doc(db, 'users', currentUser.userId);
-        await updateDoc(userRef, {
-            balance: increment(reward),
-            tasksCompletedToday: increment(1)
+function listenForWithdrawalUpdates() {
+    if (!currentUser) return;
+    
+    const { collection, query, where, onSnapshot } = window.firestoreHelpers;
+    const db = window.db;
+    
+    const withdrawalsRef = collection(db, 'withdrawal_requests');
+    const q = query(withdrawalsRef, where('userId', '==', currentUser.userId));
+    
+    onSnapshot(q, (snapshot) => {
+        allWithdrawals = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            let status = data.status || 'pending';
+            if (status === 'successful') {
+                status = 'approved';
+            }
+            allWithdrawals.push({
+                id: doc.id,
+                amount: data.amount,
+                method: data.method,
+                methodDisplay: data.methodDisplay || data.method,
+                accountNumber: data.accountNumber,
+                status: status,
+                requestedAt: data.requestedAt,
+                date: data.requestedAt ? new Date(data.requestedAt).toLocaleDateString() : new Date().toLocaleDateString(),
+                time: data.requestedAt ? new Date(data.requestedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
+            });
         });
+        allWithdrawals.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
         
-        appData.balance += reward;
-        appData.tasksCompletedToday++;
-        addActivity(`🎬 Watched ad and earned ₨${reward}`);
-        updateAllUI();
-        showToast(`🎬 +₨${reward} earned!`, 'success');
-    } catch (error) {
-        console.error('Ad reward error:', error);
-    }
+        if (document.getElementById('withdrawHistoryScreen').classList.contains('active')) {
+            renderWithdrawals();
+        }
+    });
 }
 
 // ========== DAILY BONUS ==========
-async function claimDailyBonus() {
-    const lastBonus = localStorage.getItem('lastBonusDate');
+window.claimDailyBonus = async function() {
+    if (!currentUser) return;
+    
+    const lastBonus = localStorage.getItem('lastBonus_' + currentUser.userId);
     const today = new Date().toDateString();
     
     if (lastBonus === today) {
-        showToast('Already claimed today!', 'error');
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const hoursLeft = Math.ceil((tomorrow - new Date()) / (1000 * 60 * 60));
+        showToast(`Already claimed! Next bonus in ${hoursLeft} hours`, "error");
         return;
     }
     
-    showLoading('Claiming bonus...');
-    await new Promise(r => setTimeout(r, 1000));
+    const bonus = 20 + (appData.streak * 2);
     
-    const bonus = 50 + (appData.streak * 5);
+    showLoading("Claiming bonus...");
+    await new Promise(r => setTimeout(r, 1500));
     
     try {
+        const { doc, updateDoc, increment } = window.firestoreHelpers;
+        const db = window.db;
+        
         const userRef = doc(db, 'users', currentUser.userId);
         await updateDoc(userRef, {
             balance: increment(bonus),
@@ -409,145 +365,172 @@ async function claimDailyBonus() {
         
         appData.balance += bonus;
         appData.streak++;
-        localStorage.setItem('lastBonusDate', today);
+        localStorage.setItem('lastBonus_' + currentUser.userId, today);
         
+        updateUI();
         addActivity(`🎁 Claimed daily bonus of ₨${bonus} (${appData.streak} day streak!)`);
-        updateAllUI();
-        showToast(`🎯 +₨${bonus} bonus claimed!`, 'success');
+        showToast(`🎁 +₨${bonus} bonus claimed!`, "success");
+        
     } catch (error) {
-        console.error('Bonus error:', error);
+        console.error(error);
+        showToast("Failed to claim bonus!", "error");
     }
     hideLoading();
-}
+};
 
-// ========== WITHDRAWAL FUNCTIONS ==========
-function selectWithdrawalMethod(method) {
-    selectedWithdrawalMethod = method;
-    document.querySelectorAll('.method-option').forEach(opt => opt.classList.remove('selected'));
-    event.currentTarget.classList.add('selected');
-}
-
-async function requestWithdrawal() {
-    const amount = parseInt(document.getElementById('withdrawAmount')?.value);
-    const account = document.getElementById('accountNumber')?.value;
+// ========== WATCH AD WITH REAL TIMER ==========
+window.watchAd = async function(type) {
+    if (!currentUser) {
+        showToast("Please login first!", "error");
+        return;
+    }
     
-    if (!selectedWithdrawalMethod) { showToast('Select a method!', 'error'); return; }
-    if (!amount || amount < 200) { showToast('Minimum ₨200!', 'error'); return; }
-    if (!account) { showToast('Enter account number!', 'error'); return; }
-    if (amount > appData.balance) { showToast('Insufficient balance!', 'error'); return; }
+    const lastAd = localStorage.getItem('lastAd_' + currentUser.userId);
+    const now = Date.now();
     
-    showLoading('Submitting request...');
-    await new Promise(r => setTimeout(r, 1500));
+    if (lastAd && (now - parseInt(lastAd)) < 30000) {
+        const waitTime = Math.ceil((30000 - (now - parseInt(lastAd))) / 1000);
+        showToast(`Wait ${waitTime} seconds before next ad!`, "error");
+        return;
+    }
     
-    try {
-        const withdrawalData = {
-            userId: currentUser.userId,
-            userName: currentUser.name,
-            amount: amount,
-            method: selectedWithdrawalMethod,
-            account: account,
-            status: 'pending',
-            createdAt: new Date().toISOString()
-        };
+    let duration = 10;
+    let reward = 5;
+    let message = "Watch this ad for ₨5";
+    
+    if (type === 'rewarded') {
+        duration = 30;
+        reward = 15;
+        message = "Watch rewarded ad for ₨15";
+    } else if (type === 'special') {
+        duration = 60;
+        reward = 50;
+        message = "Special offer! Watch for ₨50";
+    }
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'ad-overlay';
+    overlay.innerHTML = `
+        <div style="background: #1e293b; padding: 30px; border-radius: 20px; text-align: center;">
+            <i class="fas fa-play-circle" style="font-size: 60px; color: #667eea; margin-bottom: 20px;"></i>
+            <h3 style="color: white;">${message}</h3>
+            <div style="font-size: 48px; font-weight: bold; color: white; margin: 20px;" id="adTimer">${duration}</div>
+            <div style="width: 200px; height: 8px; background: #334155; border-radius: 10px; margin: 0 auto;">
+                <div id="adProgress" style="width: 0%; height: 100%; background: #10b981; border-radius: 10px;"></div>
+            </div>
+            <p style="color: #94a3b8; margin-top: 20px;">Don't close this window</p>
+        </div>
+    `;
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.9); z-index: 20000;
+        display: flex; justify-content: center; align-items: center;
+    `;
+    document.body.appendChild(overlay);
+    
+    let timeLeft = duration;
+    const timerDisplay = overlay.querySelector('#adTimer');
+    const progressFill = overlay.querySelector('#adProgress');
+    
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (timerDisplay) timerDisplay.innerText = timeLeft;
+        if (progressFill) progressFill.style.width = `${((duration - timeLeft) / duration) * 100}%`;
         
-        await setDoc(doc(collection(db, 'withdrawals')), withdrawalData);
+        if (timeLeft <= 0) {
+            clearInterval(interval);
+            overlay.remove();
+            giveAdReward(reward);
+        }
+    }, 1000);
+};
+
+async function giveAdReward(reward) {
+    try {
+        const { doc, updateDoc, increment } = window.firestoreHelpers;
+        const db = window.db;
         
         const userRef = doc(db, 'users', currentUser.userId);
-        await updateDoc(userRef, { balance: increment(-amount) });
+        await updateDoc(userRef, {
+            balance: increment(reward),
+            tasksCompletedToday: increment(1)
+        });
         
-        appData.balance -= amount;
-        addActivity(`💰 Withdrawal request of ₨${amount} submitted`);
-        updateAllUI();
-        showToast(`✅ Withdrawal request submitted!`, 'success');
+        appData.balance += reward;
+        localStorage.setItem('lastAd_' + currentUser.userId, Date.now().toString());
         
-        document.getElementById('withdrawAmount').value = '';
-        document.getElementById('accountNumber').value = '';
+        updateUI();
+        addActivity(`🎬 Watched ad and earned ₨${reward}`);
+        showToast(`🎬 +₨${reward} earned!`, "success");
+        
     } catch (error) {
-        console.error('Withdrawal error:', error);
-        showToast('Failed to submit!', 'error');
+        console.error(error);
+        showToast("Failed to add reward!", "error");
     }
-    hideLoading();
 }
 
-// ========== REFERRAL FUNCTIONS ==========
-function getReferralLink() {
-    return `https://kamaonow.com/ref/${currentUser?.userId}`;
+// ========== CHECK PENDING TASKS ==========
+async function checkPendingItems() {
+    if (!currentUser) return;
+    
+    try {
+        const { collection, query, where, getDocs, doc, updateDoc, arrayUnion, increment } = window.firestoreHelpers;
+        const db = window.db;
+        
+        const tasksRef = collection(db, 'task_requests');
+        const qTasks = query(tasksRef, where('userId', '==', currentUser.userId), where('status', '==', 'approved'));
+        const tasksSnapshot = await getDocs(qTasks);
+        
+        for (const docSnap of tasksSnapshot.docs) {
+            const data = docSnap.data();
+            if (!appData.completedTasks.includes(data.taskId)) {
+                const userRef = doc(db, 'users', currentUser.userId);
+                await updateDoc(userRef, {
+                    balance: increment(data.reward),
+                    completedTasks: arrayUnion(data.taskId)
+                });
+                
+                appData.balance += data.reward;
+                appData.completedTasks.push(data.taskId);
+                addActivity(`✅ Task "${data.taskName}" approved! +₨${data.reward}`);
+                updateUI();
+            }
+        }
+        
+    } catch (error) {
+        console.error("Check pending error:", error);
+    }
 }
 
-async function copyReferralLink() {
-    await navigator.clipboard.writeText(getReferralLink());
-    showToast('Referral link copied!', 'success');
+// ========== UI UPDATE FUNCTIONS ==========
+function updateUI() {
+    document.getElementById('mainBalance').innerText = appData.balance;
+    document.getElementById('withdrawBalance').innerText = appData.balance;
+    document.getElementById('streakDays').innerText = appData.streak;
+    document.getElementById('referralsCount').innerText = appData.referrals;
+    document.getElementById('todayTasks').innerText = appData.completedTasks.length;
+    document.getElementById('referTotal').innerText = appData.referrals;
+    document.getElementById('referEarned').innerText = `₨ ${appData.referrals * 25}`;
 }
 
-// ========== ACTIVITY FUNCTIONS ==========
 function addActivity(message) {
     const activity = { id: Date.now(), message: message, time: new Date().toLocaleTimeString() };
     appData.activities.unshift(activity);
     if (appData.activities.length > 20) appData.activities.pop();
-    updateActivitiesUI();
+    updateActivities();
 }
 
-// ========== UI UPDATE FUNCTIONS ==========
-function updateAllUI() {
-    updateBalanceUI();
-    updateTasksUI();
-    updateActivitiesUI();
-    updateReferralUI();
-}
-
-function updateBalanceUI() {
-    document.getElementById('mainBalance').innerText = appData.balance;
-    document.getElementById('withdrawBalance').innerText = appData.balance;
-    document.getElementById('todayTasks').innerText = appData.tasksCompletedToday;
-    document.getElementById('streakDays').innerText = appData.streak;
-    document.getElementById('referralsCount').innerText = appData.referrals;
-}
-
-function updateTasksUI() {
-    const container = document.getElementById('tasksList');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    const remainingTasks = 20 - appData.tasksCompletedToday;
-    if (remainingTasks < 5) {
-        const warning = document.createElement('div');
-        warning.className = 'task-limit-warning';
-        warning.innerHTML = `⚠️ Only ${remainingTasks} tasks left today!`;
-        container.appendChild(warning);
-    }
-    
-    appData.tasks.forEach(task => {
-        if (!task.active) return;
-        const taskCard = document.createElement('div');
-        taskCard.className = `task-card ${task.completed ? 'completed' : ''}`;
-        taskCard.innerHTML = `
-            <div class="task-info">
-                <i class="fas ${task.icon || 'fa-tasks'}"></i>
-                <div>
-                    <h4>${task.name}</h4>
-                    <p>${task.description}</p>
-                    <div class="task-reward">+₨ ${task.reward}</div>
-                </div>
-            </div>
-            <button class="task-btn" onclick="completeTask(${task.id})" ${task.completed ? 'disabled' : ''}>
-                ${task.completed ? 'Completed' : 'Complete'}
-            </button>
-        `;
-        container.appendChild(taskCard);
-    });
-}
-
-function updateActivitiesUI() {
+function updateActivities() {
     const container = document.getElementById('activityList');
     if (!container) return;
     
+    container.innerHTML = '';
     if (appData.activities.length === 0) {
-        container.innerHTML = '<div class="empty-state">No activities yet. Start earning!</div>';
+        container.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">No activities yet</div>';
         return;
     }
     
-    container.innerHTML = '';
-    appData.activities.slice(0, 10).forEach(activity => {
+    appData.activities.forEach(activity => {
         const div = document.createElement('div');
         div.className = 'activity-item';
         div.innerHTML = `<i class="fas fa-history"></i><div><div>${activity.message}</div><small>${activity.time}</small></div>`;
@@ -555,56 +538,240 @@ function updateActivitiesUI() {
     });
 }
 
-function updateReferralUI() {
-    const linkEl = document.getElementById('referralLink');
-    if (linkEl) linkEl.innerText = getReferralLink();
-    document.getElementById('referTotal').innerText = appData.referrals;
-    document.getElementById('referEarned').innerText = `₨ ${appData.referralEarnings}`;
+// ========== LOAD TASKS ==========
+async function loadTasks() {
+    const tasks = [
+        { id: 1, name: "Complete Profile", description: "Fill all profile details", reward: 50, icon: "fa-user" },
+        { id: 2, name: "Follow Instagram", description: "Follow @kamaonow", reward: 30, icon: "fa-instagram" },
+        { id: 3, name: "Join Telegram", description: "Join our Telegram channel", reward: 40, icon: "fa-telegram" },
+        { id: 4, name: "Share on WhatsApp", description: "Share with 5 friends", reward: 60, icon: "fa-whatsapp" },
+        { id: 5, name: "Watch 10 Ads", description: "Watch 10 video ads", reward: 100, icon: "fa-play-circle" }
+    ];
+    
+    const container = document.getElementById('tasksList');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    for (let task of tasks) {
+        const isCompleted = appData.completedTasks?.includes(task.id);
+        const div = document.createElement('div');
+        div.className = `task-item ${isCompleted ? 'completed' : ''}`;
+        div.innerHTML = `
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <i class="fas ${task.icon}" style="font-size: 24px; color: #667eea;"></i>
+                <div>
+                    <strong>${task.name}</strong>
+                    <div>+₨ ${task.reward}</div>
+                    <small style="color: #666;">${task.description}</small>
+                </div>
+            </div>
+            ${!isCompleted ? `<button class="task-btn" onclick="window.completeTask(${task.id}, '${task.name}', ${task.reward})">Complete</button>` : '<span style="color: #10b981;">✅ Verified</span>'}
+        `;
+        container.appendChild(div);
+    }
 }
 
-// ========== NAVIGATION ==========
-function navigateTo(screen) {
-    const screens = ['home', 'tasks', 'earn', 'withdraw', 'refer'];
+// ========== LOAD USER DATA FROM FIREBASE ==========
+async function loadUserData(userId) {
+    try {
+        const { doc, getDoc } = window.firestoreHelpers;
+        const db = window.db;
+        
+        const userRef = doc(db, 'users', userId);
+        const docSnap = await getDoc(userRef);
+        
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            appData.balance = data.balance || 0;
+            appData.completedTasks = data.completedTasks || [];
+            appData.referrals = data.referrals || 0;
+            appData.streak = data.streak || 1;
+        }
+        
+        updateUI();
+        loadTasks();
+        checkPendingItems();
+        listenForWithdrawalUpdates();
+        
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+// ========== LOGIN FUNCTION ==========
+window.loginUser = async function() {
+    const email = document.getElementById('loginEmail')?.value;
+    const password = document.getElementById('loginPassword')?.value;
+    
+    if (!email || !password) {
+        showToast("Please enter email and password!", "error");
+        return;
+    }
+    
+    showLoading("Logging in...");
+    
+    try {
+        const { collection, query, where, getDocs } = window.firestoreHelpers;
+        const db = window.db;
+        
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', email));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) {
+            showToast("User not found! Please register.", "error");
+            hideLoading();
+            return;
+        }
+        
+        let userData = null;
+        snapshot.forEach(doc => { userData = doc.data(); });
+        
+        if (btoa(password) !== userData.password) {
+            showToast("Wrong password!", "error");
+            hideLoading();
+            return;
+        }
+        
+        currentUser = userData;
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        
+        await loadUserData(currentUser.userId);
+        
+        document.getElementById('authModal').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('userName').innerText = currentUser.name;
+        
+        const linkEl = document.getElementById('referralLink');
+        if (linkEl) {
+            linkEl.innerText = `https://kamaonow.com/ref/${currentUser.userId}`;
+        }
+        
+        showToast(`✅ Welcome back, ${currentUser.name}!`, "success");
+        
+    } catch (error) {
+        console.error(error);
+        showToast("Login failed!", "error");
+    }
+    hideLoading();
+};
+
+// ========== REGISTER FUNCTION ==========
+window.registerUser = async function() {
+    const name = document.getElementById('regName')?.value;
+    const email = document.getElementById('regEmail')?.value;
+    const password = document.getElementById('regPassword')?.value;
+    const confirm = document.getElementById('regConfirmPassword')?.value;
+    
+    if (!name || !email || !password) {
+        showToast("Please fill all fields!", "error");
+        return;
+    }
+    if (password !== confirm) {
+        showToast("Passwords do not match!", "error");
+        return;
+    }
+    if (password.length < 6) {
+        showToast("Password must be at least 6 characters!", "error");
+        return;
+    }
+    
+    showLoading("Creating account...");
+    
+    try {
+        const { collection, query, where, getDocs, doc, setDoc } = window.firestoreHelpers;
+        const db = window.db;
+        
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', email));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+            showToast("Email already registered!", "error");
+            hideLoading();
+            return;
+        }
+        
+        const userId = 'user_' + Date.now();
+        await setDoc(doc(db, 'users', userId), {
+            userId: userId,
+            name: name,
+            email: email,
+            password: btoa(password),
+            balance: 0,
+            completedTasks: [],
+            referrals: 0,
+            streak: 1,
+            createdAt: new Date().toISOString(),
+            status: 'active'
+        });
+        
+        showToast("✅ Registration successful! Please login.", "success");
+        window.switchAuthTab('login');
+        
+        document.getElementById('regName').value = '';
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regPassword').value = '';
+        document.getElementById('regConfirmPassword').value = '';
+        
+    } catch (error) {
+        console.error(error);
+        showToast("Registration failed!", "error");
+    }
+    hideLoading();
+};
+
+// ========== HELPER FUNCTIONS ==========
+function showToast(msg, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = `toast show ${type}`;
+    setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+function showLoading(msg) {
+    const loader = document.createElement('div');
+    loader.id = 'loadingOverlay';
+    loader.className = 'loading';
+    loader.innerHTML = `<div class="loader"></div><div>${msg}</div>`;
+    document.body.appendChild(loader);
+}
+
+function hideLoading() {
+    const loader = document.getElementById('loadingOverlay');
+    if (loader) loader.remove();
+}
+
+window.logoutUser = function() {
+    localStorage.removeItem('currentUser');
+    currentUser = null;
+    document.getElementById('authModal').style.display = 'flex';
+    document.getElementById('appContainer').style.display = 'none';
+    showToast("Logged out successfully!", "success");
+};
+
+window.navigateTo = function(screen) {
+    const screens = ['home', 'tasks', 'earn', 'withdraw', 'refer', 'withdrawHistory'];
     screens.forEach(s => {
         const el = document.getElementById(`${s}Screen`);
         if (el) el.classList.remove('active');
     });
     document.getElementById(`${screen}Screen`).classList.add('active');
     
+    if (screen === 'withdrawHistory') {
+        loadWithdrawalHistory();
+    }
+    
     const navItems = document.querySelectorAll('.nav-item');
-    const screenMap = { home: 0, tasks: 1, earn: 2, withdraw: 3, refer: 4 };
+    const screenMap = { home: 0, tasks: 1, earn: 2, withdraw: 3, withdrawHistory: 4, refer: 5 };
     navItems.forEach((item, index) => {
         if (index === screenMap[screen]) item.classList.add('active');
         else item.classList.remove('active');
     });
-    updateAllUI();
-}
+};
 
-// ========== UI HELPER FUNCTIONS ==========
-function showToast(message, type = 'success') {
-    const toast = document.createElement('div');
-    toast.className = 'toast-message';
-    toast.style.background = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6';
-    toast.style.color = 'white';
-    toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> ${message}`;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
-
-function showLoading(message) {
-    const loader = document.createElement('div');
-    loader.id = 'globalLoader';
-    loader.className = 'loading-overlay';
-    loader.innerHTML = `<div class="loader"></div><p style="margin-top: 15px;">${message}</p>`;
-    document.body.appendChild(loader);
-}
-
-function hideLoading() {
-    const loader = document.getElementById('globalLoader');
-    if (loader) loader.remove();
-}
-
-function switchAuthTab(tab) {
+window.switchAuthTab = function(tab) {
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
     const tabs = document.querySelectorAll('.tab-btn');
@@ -620,24 +787,26 @@ function switchAuthTab(tab) {
         tabs[0].classList.remove('active');
         tabs[1].classList.add('active');
     }
+};
+
+window.copyReferralLink = function() {
+    const link = `https://kamaonow.com/ref/${currentUser?.userId || 'guest'}`;
+    navigator.clipboard.writeText(link);
+    showToast("Referral link copied!", "success");
+};
+
+// ========== CHECK SAVED USER ==========
+const savedUser = localStorage.getItem('currentUser');
+if (savedUser) {
+    currentUser = JSON.parse(savedUser);
+    document.getElementById('authModal').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'block';
+    document.getElementById('userName').innerText = currentUser.name;
+    loadUserData(currentUser.userId);
 }
 
-// ========== EXPOSE GLOBAL FUNCTIONS ==========
-window.registerUser = registerUser;
-window.loginUser = loginUser;
-window.logoutUser = logoutUser;
-window.completeTask = completeTask;
-window.watchAd = watchAd;
-window.claimDailyBonus = claimDailyBonus;
-window.selectWithdrawalMethod = selectWithdrawalMethod;
-window.requestWithdrawal = requestWithdrawal;
-window.copyReferralLink = copyReferralLink;
-window.navigateTo = navigateTo;
-window.switchAuthTab = switchAuthTab;
+setInterval(() => {
+    if (currentUser) checkPendingItems();
+}, 30000);
 
-// ========== INITIALIZE ==========
-document.addEventListener('DOMContentLoaded', () => {
-    checkAuth();
-});
-
-console.log("🚀 KamaoNow Fully Functional!");
+console.log("✅ KamaoNow Production Mode Ready - Withdrawal History Working!");
