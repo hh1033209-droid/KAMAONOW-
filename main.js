@@ -1,738 +1,91 @@
-// ========== KAMAONOW PRODUCTION VERSION - FINAL WITH REFERRAL FIX ==========
-console.log("🚀 KamaoNow Production Mode Loading...");
+// ========== KAMAONOW USER APP WITH SETTINGS ==========
+console.log("🚀 KamaoNow Loading...");
 
-// ========== GLOBAL VARIABLES ==========
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.0/firebase-app.js";
+import { 
+    getFirestore, 
+    collection, 
+    doc, 
+    setDoc, 
+    getDoc, 
+    getDocs, 
+    query, 
+    where, 
+    updateDoc, 
+    increment, 
+    arrayUnion, 
+    onSnapshot, 
+    addDoc 
+} from "https://www.gstatic.com/firebasejs/12.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBsny5xLAKyeFWBf1De4WKTfuNuzy5UIoA",
+    authDomain: "kamaonow-bf070.firebaseapp.com",
+    projectId: "kamaonow-bf070",
+    storageBucket: "kamaonow-bf070.firebasestorage.app",
+    messagingSenderId: "107731628902",
+    appId: "1:107731628902:web:b9d36a0698995385124ea7"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 let currentUser = null;
 let selectedMethod = null;
 let currentFilter = 'all';
 let allWithdrawals = [];
 
+// ========== APP SETTINGS (FROM ADMIN) ==========
+let appSettings = {
+    minWithdrawal: 200,
+    dailyTaskLimit: 20,
+    referralCommission: 15,
+    welcomeBonus: 100
+};
+
+async function loadSettings() {
+    try {
+        const settingsRef = doc(db, 'settings', 'app');
+        const settingsSnap = await getDoc(settingsRef);
+        
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            appSettings.minWithdrawal = data.minWithdrawal || 200;
+            appSettings.dailyTaskLimit = data.dailyTaskLimit || 20;
+            appSettings.referralCommission = data.referralCommission || 15;
+            appSettings.welcomeBonus = data.welcomeBonus || 100;
+        }
+        console.log("✅ Settings loaded:", appSettings);
+        
+        // 🔥 UPDATE WITHDRAW PAGE MIN AMOUNT DISPLAY
+        updateWithdrawPageSettings();
+    } catch (error) {
+        console.error("Error loading settings:", error);
+    }
+}
+
+// 🔥 NEW FUNCTION: Update withdraw page with current settings
+function updateWithdrawPageSettings() {
+    const minWithdrawLabel = document.querySelector('.withdraw-input label');
+    if (minWithdrawLabel) {
+        minWithdrawLabel.innerHTML = `Amount (Min ₨${appSettings.minWithdrawal})`;
+    }
+    const withdrawAmountInput = document.getElementById('withdrawAmount');
+    if (withdrawAmountInput) {
+        withdrawAmountInput.placeholder = `Min ₨${appSettings.minWithdrawal}`;
+        withdrawAmountInput.min = appSettings.minWithdrawal;
+    }
+}
+
 let appData = {
     balance: 0,
-    pendingTasks: [],
-    pendingWithdrawals: [],
     completedTasks: [],
     referrals: 0,
     streak: 1,
-    activities: []
+    activities: [],
+    tasks: []
 };
 
-// ========== REFERRAL LINK UPDATE FUNCTION (NEW) ==========
-function updateReferralLink() {
-    const linkEl = document.getElementById('referralLink');
-    if (linkEl) {
-        if (currentUser && currentUser.userId) {
-            linkEl.innerText = `https://kamaonow.com/ref/${currentUser.userId}`;
-        } else {
-            linkEl.innerText = "Please login to get your referral link";
-        }
-    }
-}
-
-// ========== COMPLETE TASK WITH VERIFICATION ==========
-window.completeTask = async function(taskId, taskName, reward) {
-    if (!currentUser) {
-        showToast("Please login first!", "error");
-        return;
-    }
-    
-    if (appData.completedTasks.includes(taskId)) {
-        showToast("Task already completed!", "error");
-        return;
-    }
-    
-    const proof = prompt(`📸 Task: ${taskName}\n\nPaste your proof (image link or description):`);
-    if (!proof || proof.trim() === "") {
-        showToast("Proof required to complete task!", "error");
-        return;
-    }
-    
-    showLoading("Submitting for verification...");
-    
-    try {
-        const { collection, addDoc } = window.firestoreHelpers;
-        const db = window.db;
-        
-        await addDoc(collection(db, 'task_requests'), {
-            userId: currentUser.userId,
-            userName: currentUser.name,
-            taskId: taskId,
-            taskName: taskName,
-            reward: reward,
-            proof: proof,
-            status: 'pending',
-            submittedAt: new Date().toISOString()
-        });
-        
-        showToast("✅ Task submitted! Admin will verify within 24 hours.", "success");
-        addActivity(`📝 Submitted "${taskName}" for verification`);
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Failed to submit task!", "error");
-    }
-    hideLoading();
-};
-
-// ========== WITHDRAWAL REQUEST ==========
-window.requestWithdrawal = async function() {
-    console.log("💰 Withdrawal button clicked");
-    
-    if (!currentUser) {
-        showToast("Please login first!", "error");
-        return;
-    }
-    
-    const amount = parseInt(document.getElementById('withdrawAmount')?.value);
-    const account = document.getElementById('accountNumber')?.value;
-    const method = selectedMethod;
-    
-    console.log("Method selected:", method);
-    console.log("Amount:", amount);
-    console.log("Account:", account);
-    
-    if (!method) {
-        showToast("Please select a withdrawal method (JazzCash/EasyPaisa/UPaisa)!", "error");
-        return;
-    }
-    if (!amount || amount < 200) {
-        showToast("Minimum withdrawal amount is ₨200!", "error");
-        return;
-    }
-    if (!account || account.trim() === "") {
-        showToast("Please enter account number!", "error");
-        return;
-    }
-    if (amount > appData.balance) {
-        showToast(`Insufficient balance! Your balance: ₨${appData.balance}`, "error");
-        return;
-    }
-    
-    showLoading("Submitting withdrawal request...");
-    
-    try {
-        const { collection, addDoc } = window.firestoreHelpers;
-        const db = window.db;
-        
-        let methodDisplay = "";
-        if (method === 'jazzcash') methodDisplay = "JazzCash";
-        else if (method === 'easypaisa') methodDisplay = "EasyPaisa";
-        else if (method === 'upaisa') methodDisplay = "UPaisa";
-        
-        await addDoc(collection(db, 'withdrawal_requests'), {
-            userId: currentUser.userId,
-            userName: currentUser.name,
-            amount: amount,
-            method: method,
-            methodDisplay: methodDisplay,
-            accountNumber: account,
-            status: 'pending',
-            requestedAt: new Date().toISOString()
-        });
-        
-        showToast(`✅ Withdrawal request of ₨${amount} submitted via ${methodDisplay}!`, "success");
-        addActivity(`💰 Requested withdrawal of ₨${amount} via ${methodDisplay}`);
-        
-        if (document.getElementById('withdrawHistoryScreen').classList.contains('active')) {
-            loadWithdrawalHistory();
-        }
-        
-        document.getElementById('withdrawAmount').value = '';
-        document.getElementById('accountNumber').value = '';
-        document.querySelectorAll('.method-option').forEach(opt => opt.classList.remove('selected'));
-        selectedMethod = null;
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Failed to submit request: " + error.message, "error");
-    }
-    hideLoading();
-};
-
-// ========== SELECT WITHDRAWAL METHOD ==========
-window.selectWithdrawalMethod = function(method) {
-    selectedMethod = method;
-    console.log("Method selected:", method);
-    
-    document.querySelectorAll('.method-option').forEach(opt => {
-        opt.classList.remove('selected');
-    });
-    
-    if (event && event.currentTarget) {
-        event.currentTarget.classList.add('selected');
-    }
-    
-    let methodName = "";
-    if (method === 'jazzcash') methodName = "JazzCash";
-    else if (method === 'easypaisa') methodName = "EasyPaisa";
-    else if (method === 'upaisa') methodName = "UPaisa";
-    
-    showToast(`Selected: ${methodName}`, "success");
-};
-
-// ========== WITHDRAWAL HISTORY FUNCTIONS ==========
-
-async function loadWithdrawalHistory() {
-    if (!currentUser) return;
-    
-    try {
-        const { collection, query, where, getDocs } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const withdrawalsRef = collection(db, 'withdrawal_requests');
-        const q = query(withdrawalsRef, where('userId', '==', currentUser.userId));
-        const snapshot = await getDocs(q);
-        
-        allWithdrawals = [];
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            let status = data.status || 'pending';
-            if (status === 'successful') {
-                status = 'approved';
-            }
-            allWithdrawals.push({
-                id: doc.id,
-                amount: data.amount,
-                method: data.method,
-                methodDisplay: data.methodDisplay || data.method,
-                accountNumber: data.accountNumber,
-                status: status,
-                requestedAt: data.requestedAt,
-                date: data.requestedAt ? new Date(data.requestedAt).toLocaleDateString() : new Date().toLocaleDateString(),
-                time: data.requestedAt ? new Date(data.requestedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
-            });
-        });
-        
-        allWithdrawals.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
-        renderWithdrawals();
-        
-    } catch (error) {
-        console.error("Failed to load withdrawals:", error);
-    }
-}
-
-window.filterWithdrawals = function(status) {
-    currentFilter = status;
-    
-    document.querySelectorAll('.history-tab').forEach(tab => {
-        tab.classList.remove('active');
-        const tabText = tab.textContent.toLowerCase().trim();
-        if (status === 'all' && tabText === 'all') {
-            tab.classList.add('active');
-        } else if (tabText === status) {
-            tab.classList.add('active');
-        }
-    });
-    
-    renderWithdrawals();
-};
-
-function renderWithdrawals() {
-    const container = document.getElementById('withdrawalsList');
-    if (!container) return;
-    
-    let filtered = allWithdrawals;
-    if (currentFilter !== 'all') {
-        filtered = allWithdrawals.filter(w => w.status === currentFilter);
-    }
-    
-    if (filtered.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-history"></i>
-                <p>No ${currentFilter !== 'all' ? currentFilter : ''} withdrawal requests found</p>
-                <small>Your withdrawal history will appear here</small>
-            </div>
-        `;
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    filtered.forEach(withdrawal => {
-        let methodIcon = "fa-mobile-alt";
-        if (withdrawal.method === 'jazzcash') methodIcon = "fa-mobile-alt";
-        else if (withdrawal.method === 'easypaisa') methodIcon = "fa-mobile-alt";
-        else if (withdrawal.method === 'upaisa') methodIcon = "fa-university";
-        
-        let statusText = "";
-        let statusIcon = "";
-        let statusClass = "";
-        
-        if (withdrawal.status === 'approved') {
-            statusText = "Approved";
-            statusIcon = "fa-check-circle";
-            statusClass = "approved";
-        } else if (withdrawal.status === 'pending') {
-            statusText = "Pending";
-            statusIcon = "fa-clock";
-            statusClass = "pending";
-        } else if (withdrawal.status === 'rejected') {
-            statusText = "Rejected";
-            statusIcon = "fa-times-circle";
-            statusClass = "rejected";
-        } else {
-            statusText = withdrawal.status.charAt(0).toUpperCase() + withdrawal.status.slice(1);
-            statusIcon = "fa-question-circle";
-            statusClass = "pending";
-        }
-        
-        const card = document.createElement('div');
-        card.className = `withdrawal-card ${statusClass}`;
-        card.innerHTML = `
-            <div class="withdrawal-header">
-                <div class="withdrawal-amount">
-                    <i class="fas fa-rupee-sign"></i> ${withdrawal.amount}
-                </div>
-                <div class="withdrawal-status status-${statusClass}">
-                    <i class="fas ${statusIcon}"></i> ${statusText}
-                </div>
-            </div>
-            <div class="withdrawal-details">
-                <p><i class="fas ${methodIcon}"></i> ${withdrawal.methodDisplay || withdrawal.method}</p>
-                <p><i class="fas fa-user"></i> Account: ${withdrawal.accountNumber || 'N/A'}</p>
-                <p><i class="fas fa-calendar"></i> Date: ${withdrawal.date}</p>
-                <p><i class="fas fa-clock"></i> Time: ${withdrawal.time}</p>
-        `;
-        
-        if (withdrawal.status === 'approved') {
-            card.innerHTML += '<p class="approved-text"><i class="fas fa-check-circle"></i> ✅ Amount sent to your account</p>';
-        } else if (withdrawal.status === 'rejected') {
-            card.innerHTML += '<p class="rejected-text"><i class="fas fa-exclamation-circle"></i> ❌ Request rejected. Contact support.</p>';
-        } else if (withdrawal.status === 'pending') {
-            card.innerHTML += '<p class="pending-text"><i class="fas fa-hourglass-half"></i> ⏳ Admin will process within 48 hours</p>';
-        }
-        
-        card.innerHTML += `</div>`;
-        container.appendChild(card);
-    });
-}
-
-function listenForWithdrawalUpdates() {
-    if (!currentUser) return;
-    
-    const { collection, query, where, onSnapshot } = window.firestoreHelpers;
-    const db = window.db;
-    
-    const withdrawalsRef = collection(db, 'withdrawal_requests');
-    const q = query(withdrawalsRef, where('userId', '==', currentUser.userId));
-    
-    onSnapshot(q, (snapshot) => {
-        allWithdrawals = [];
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            let status = data.status || 'pending';
-            if (status === 'successful') {
-                status = 'approved';
-            }
-            allWithdrawals.push({
-                id: doc.id,
-                amount: data.amount,
-                method: data.method,
-                methodDisplay: data.methodDisplay || data.method,
-                accountNumber: data.accountNumber,
-                status: status,
-                requestedAt: data.requestedAt,
-                date: data.requestedAt ? new Date(data.requestedAt).toLocaleDateString() : new Date().toLocaleDateString(),
-                time: data.requestedAt ? new Date(data.requestedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
-            });
-        });
-        allWithdrawals.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
-        
-        if (document.getElementById('withdrawHistoryScreen').classList.contains('active')) {
-            renderWithdrawals();
-        }
-    });
-}
-
-// ========== DAILY BONUS ==========
-window.claimDailyBonus = async function() {
-    if (!currentUser) return;
-    
-    const lastBonus = localStorage.getItem('lastBonus_' + currentUser.userId);
-    const today = new Date().toDateString();
-    
-    if (lastBonus === today) {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const hoursLeft = Math.ceil((tomorrow - new Date()) / (1000 * 60 * 60));
-        showToast(`Already claimed! Next bonus in ${hoursLeft} hours`, "error");
-        return;
-    }
-    
-    const bonus = 20 + (appData.streak * 2);
-    
-    showLoading("Claiming bonus...");
-    await new Promise(r => setTimeout(r, 1500));
-    
-    try {
-        const { doc, updateDoc, increment } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const userRef = doc(db, 'users', currentUser.userId);
-        await updateDoc(userRef, {
-            balance: increment(bonus),
-            streak: increment(1)
-        });
-        
-        appData.balance += bonus;
-        appData.streak++;
-        localStorage.setItem('lastBonus_' + currentUser.userId, today);
-        
-        updateUI();
-        addActivity(`🎁 Claimed daily bonus of ₨${bonus} (${appData.streak} day streak!)`);
-        showToast(`🎁 +₨${bonus} bonus claimed!`, "success");
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Failed to claim bonus!", "error");
-    }
-    hideLoading();
-};
-
-// ========== WATCH AD WITH REAL TIMER ==========
-window.watchAd = async function(type) {
-    if (!currentUser) {
-        showToast("Please login first!", "error");
-        return;
-    }
-    
-    const lastAd = localStorage.getItem('lastAd_' + currentUser.userId);
-    const now = Date.now();
-    
-    if (lastAd && (now - parseInt(lastAd)) < 30000) {
-        const waitTime = Math.ceil((30000 - (now - parseInt(lastAd))) / 1000);
-        showToast(`Wait ${waitTime} seconds before next ad!`, "error");
-        return;
-    }
-    
-    let duration = 10;
-    let reward = 5;
-    let message = "Watch this ad for ₨5";
-    
-    if (type === 'rewarded') {
-        duration = 30;
-        reward = 15;
-        message = "Watch rewarded ad for ₨15";
-    } else if (type === 'special') {
-        duration = 60;
-        reward = 50;
-        message = "Special offer! Watch for ₨50";
-    }
-    
-    const overlay = document.createElement('div');
-    overlay.className = 'ad-overlay';
-    overlay.innerHTML = `
-        <div style="background: #1e293b; padding: 30px; border-radius: 20px; text-align: center;">
-            <i class="fas fa-play-circle" style="font-size: 60px; color: #667eea; margin-bottom: 20px;"></i>
-            <h3 style="color: white;">${message}</h3>
-            <div style="font-size: 48px; font-weight: bold; color: white; margin: 20px;" id="adTimer">${duration}</div>
-            <div style="width: 200px; height: 8px; background: #334155; border-radius: 10px; margin: 0 auto;">
-                <div id="adProgress" style="width: 0%; height: 100%; background: #10b981; border-radius: 10px;"></div>
-            </div>
-            <p style="color: #94a3b8; margin-top: 20px;">Don't close this window</p>
-        </div>
-    `;
-    overlay.style.cssText = `
-        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.9); z-index: 20000;
-        display: flex; justify-content: center; align-items: center;
-    `;
-    document.body.appendChild(overlay);
-    
-    let timeLeft = duration;
-    const timerDisplay = overlay.querySelector('#adTimer');
-    const progressFill = overlay.querySelector('#adProgress');
-    
-    const interval = setInterval(() => {
-        timeLeft--;
-        if (timerDisplay) timerDisplay.innerText = timeLeft;
-        if (progressFill) progressFill.style.width = `${((duration - timeLeft) / duration) * 100}%`;
-        
-        if (timeLeft <= 0) {
-            clearInterval(interval);
-            overlay.remove();
-            giveAdReward(reward);
-        }
-    }, 1000);
-};
-
-async function giveAdReward(reward) {
-    try {
-        const { doc, updateDoc, increment } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const userRef = doc(db, 'users', currentUser.userId);
-        await updateDoc(userRef, {
-            balance: increment(reward),
-            tasksCompletedToday: increment(1)
-        });
-        
-        appData.balance += reward;
-        localStorage.setItem('lastAd_' + currentUser.userId, Date.now().toString());
-        
-        updateUI();
-        addActivity(`🎬 Watched ad and earned ₨${reward}`);
-        showToast(`🎬 +₨${reward} earned!`, "success");
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Failed to add reward!", "error");
-    }
-}
-
-// ========== CHECK PENDING TASKS ==========
-async function checkPendingItems() {
-    if (!currentUser) return;
-    
-    try {
-        const { collection, query, where, getDocs, doc, updateDoc, arrayUnion, increment } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const tasksRef = collection(db, 'task_requests');
-        const qTasks = query(tasksRef, where('userId', '==', currentUser.userId), where('status', '==', 'approved'));
-        const tasksSnapshot = await getDocs(qTasks);
-        
-        for (const docSnap of tasksSnapshot.docs) {
-            const data = docSnap.data();
-            if (!appData.completedTasks.includes(data.taskId)) {
-                const userRef = doc(db, 'users', currentUser.userId);
-                await updateDoc(userRef, {
-                    balance: increment(data.reward),
-                    completedTasks: arrayUnion(data.taskId)
-                });
-                
-                appData.balance += data.reward;
-                appData.completedTasks.push(data.taskId);
-                addActivity(`✅ Task "${data.taskName}" approved! +₨${data.reward}`);
-                updateUI();
-            }
-        }
-        
-    } catch (error) {
-        console.error("Check pending error:", error);
-    }
-}
-
-// ========== UI UPDATE FUNCTIONS ==========
-function updateUI() {
-    document.getElementById('mainBalance').innerText = appData.balance;
-    document.getElementById('withdrawBalance').innerText = appData.balance;
-    document.getElementById('streakDays').innerText = appData.streak;
-    document.getElementById('referralsCount').innerText = appData.referrals;
-    document.getElementById('todayTasks').innerText = appData.completedTasks.length;
-    document.getElementById('referTotal').innerText = appData.referrals;
-    document.getElementById('referEarned').innerText = `₨ ${appData.referrals * 25}`;
-}
-
-function addActivity(message) {
-    const activity = { id: Date.now(), message: message, time: new Date().toLocaleTimeString() };
-    appData.activities.unshift(activity);
-    if (appData.activities.length > 20) appData.activities.pop();
-    updateActivities();
-}
-
-function updateActivities() {
-    const container = document.getElementById('activityList');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    if (appData.activities.length === 0) {
-        container.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">No activities yet</div>';
-        return;
-    }
-    
-    appData.activities.forEach(activity => {
-        const div = document.createElement('div');
-        div.className = 'activity-item';
-        div.innerHTML = `<i class="fas fa-history"></i><div><div>${activity.message}</div><small>${activity.time}</small></div>`;
-        container.appendChild(div);
-    });
-}
-
-// ========== LOAD TASKS ==========
-async function loadTasks() {
-    const tasks = [
-        { id: 1, name: "Complete Profile", description: "Fill all profile details", reward: 50, icon: "fa-user" },
-        { id: 2, name: "Follow Instagram", description: "Follow @kamaonow", reward: 30, icon: "fa-instagram" },
-        { id: 3, name: "Join Telegram", description: "Join our Telegram channel", reward: 40, icon: "fa-telegram" },
-        { id: 4, name: "Share on WhatsApp", description: "Share with 5 friends", reward: 60, icon: "fa-whatsapp" },
-        { id: 5, name: "Watch 10 Ads", description: "Watch 10 video ads", reward: 100, icon: "fa-play-circle" }
-    ];
-    
-    const container = document.getElementById('tasksList');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    for (let task of tasks) {
-        const isCompleted = appData.completedTasks?.includes(task.id);
-        const div = document.createElement('div');
-        div.className = `task-item ${isCompleted ? 'completed' : ''}`;
-        div.innerHTML = `
-            <div style="display: flex; gap: 12px; align-items: center;">
-                <i class="fas ${task.icon}" style="font-size: 24px; color: #667eea;"></i>
-                <div>
-                    <strong>${task.name}</strong>
-                    <div>+₨ ${task.reward}</div>
-                    <small style="color: #666;">${task.description}</small>
-                </div>
-            </div>
-            ${!isCompleted ? `<button class="task-btn" onclick="window.completeTask(${task.id}, '${task.name}', ${task.reward})">Complete</button>` : '<span style="color: #10b981;">✅ Verified</span>'}
-        `;
-        container.appendChild(div);
-    }
-}
-
-// ========== LOAD USER DATA FROM FIREBASE ==========
-async function loadUserData(userId) {
-    try {
-        const { doc, getDoc } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const userRef = doc(db, 'users', userId);
-        const docSnap = await getDoc(userRef);
-        
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            appData.balance = data.balance || 0;
-            appData.completedTasks = data.completedTasks || [];
-            appData.referrals = data.referrals || 0;
-            appData.streak = data.streak || 1;
-        }
-        
-        updateUI();
-        loadTasks();
-        checkPendingItems();
-        listenForWithdrawalUpdates();
-        
-    } catch (error) {
-        console.error(error);
-    }
-}
-
-// ========== LOGIN FUNCTION (UPDATED) ==========
-window.loginUser = async function() {
-    const email = document.getElementById('loginEmail')?.value;
-    const password = document.getElementById('loginPassword')?.value;
-    
-    if (!email || !password) {
-        showToast("Please enter email and password!", "error");
-        return;
-    }
-    
-    showLoading("Logging in...");
-    
-    try {
-        const { collection, query, where, getDocs } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email));
-        const snapshot = await getDocs(q);
-        
-        if (snapshot.empty) {
-            showToast("User not found! Please register.", "error");
-            hideLoading();
-            return;
-        }
-        
-        let userData = null;
-        snapshot.forEach(doc => { userData = doc.data(); });
-        
-        if (btoa(password) !== userData.password) {
-            showToast("Wrong password!", "error");
-            hideLoading();
-            return;
-        }
-        
-        currentUser = userData;
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        
-        await loadUserData(currentUser.userId);
-        
-        document.getElementById('authModal').style.display = 'none';
-        document.getElementById('appContainer').style.display = 'block';
-        document.getElementById('userName').innerText = currentUser.name;
-        
-        // 🔥 UPDATE REFERRAL LINK AFTER LOGIN 🔥
-        updateReferralLink();
-        
-        showToast(`✅ Welcome back, ${currentUser.name}!`, "success");
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Login failed!", "error");
-    }
-    hideLoading();
-};
-
-// ========== REGISTER FUNCTION ==========
-window.registerUser = async function() {
-    const name = document.getElementById('regName')?.value;
-    const email = document.getElementById('regEmail')?.value;
-    const password = document.getElementById('regPassword')?.value;
-    const confirm = document.getElementById('regConfirmPassword')?.value;
-    
-    if (!name || !email || !password) {
-        showToast("Please fill all fields!", "error");
-        return;
-    }
-    if (password !== confirm) {
-        showToast("Passwords do not match!", "error");
-        return;
-    }
-    if (password.length < 6) {
-        showToast("Password must be at least 6 characters!", "error");
-        return;
-    }
-    
-    showLoading("Creating account...");
-    
-    try {
-        const { collection, query, where, getDocs, doc, setDoc } = window.firestoreHelpers;
-        const db = window.db;
-        
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('email', '==', email));
-        const snapshot = await getDocs(q);
-        
-        if (!snapshot.empty) {
-            showToast("Email already registered!", "error");
-            hideLoading();
-            return;
-        }
-        
-        const userId = 'user_' + Date.now();
-        await setDoc(doc(db, 'users', userId), {
-            userId: userId,
-            name: name,
-            email: email,
-            password: btoa(password),
-            balance: 0,
-            completedTasks: [],
-            referrals: 0,
-            streak: 1,
-            createdAt: new Date().toISOString(),
-            status: 'active'
-        });
-        
-        showToast("✅ Registration successful! Please login.", "success");
-        window.switchAuthTab('login');
-        
-        document.getElementById('regName').value = '';
-        document.getElementById('regEmail').value = '';
-        document.getElementById('regPassword').value = '';
-        document.getElementById('regConfirmPassword').value = '';
-        
-    } catch (error) {
-        console.error(error);
-        showToast("Registration failed!", "error");
-    }
-    hideLoading();
-};
-
-// ========== HELPER FUNCTIONS ==========
 function showToast(msg, type = 'success') {
     const toast = document.getElementById('toast');
     toast.textContent = msg;
@@ -753,6 +106,364 @@ function hideLoading() {
     if (loader) loader.remove();
 }
 
+async function loadTasks() {
+    try {
+        const snapshot = await getDocs(collection(db, 'tasks'));
+        appData.tasks = [];
+        snapshot.forEach(doc => {
+            const task = doc.data();
+            task.id = parseInt(doc.id);
+            task.completed = appData.completedTasks?.includes(task.id) || false;
+            if (task.active !== false) appData.tasks.push(task);
+        });
+        renderTasks();
+    } catch (error) {
+        console.error(error);
+        appData.tasks = [];
+        renderTasks();
+    }
+}
+
+function renderTasks() {
+    const container = document.getElementById('tasksList');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    if (appData.tasks.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:40px;">No tasks available yet.</div>';
+        return;
+    }
+    
+    for (let task of appData.tasks) {
+        const isCompleted = appData.completedTasks?.includes(task.id);
+        const hasLink = task.link && task.link !== "";
+        const div = document.createElement('div');
+        div.className = `task-item ${isCompleted ? 'completed' : ''}`;
+        
+        let buttonsHtml = '';
+        if (!isCompleted) {
+            if (hasLink) {
+                buttonsHtml = `
+                    <div style="display: flex; gap: 8px;">
+                        <a href="${task.link}" target="_blank" style="background: #f59e0b; color: white; text-decoration: none; padding: 8px 15px; border-radius: 20px; font-size: 12px;">Start Offer</a>
+                        <button class="task-btn" onclick="completeTask(${task.id}, '${task.name}', ${task.reward})">Complete</button>
+                    </div>
+                `;
+            } else {
+                buttonsHtml = `<button class="task-btn" onclick="completeTask(${task.id}, '${task.name}', ${task.reward})">Complete</button>`;
+            }
+        } else {
+            buttonsHtml = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> Completed</span>';
+        }
+        
+        div.innerHTML = `
+            <div style="display: flex; gap: 12px; align-items: center; flex: 1;">
+                <i class="fas ${task.icon || 'fa-tasks'}" style="font-size: 24px; color: #667eea;"></i>
+                <div style="flex: 1;">
+                    <strong>${task.name}</strong>
+                    <div style="color:#10b981; font-weight:bold;">+₨ ${task.reward}</div>
+                    <small style="color:#666;">${task.description || ''}</small>
+                </div>
+            </div>
+            <div>${buttonsHtml}</div>
+        `;
+        container.appendChild(div);
+    }
+}
+
+window.completeTask = async function(taskId, taskName, reward) {
+    if (!currentUser) { showToast("Please login first!", "error"); return; }
+    if (appData.completedTasks.includes(taskId)) { showToast("Task already completed!", "error"); return; }
+    
+    const task = appData.tasks.find(t => t.id === taskId);
+    const taskLink = task?.link || null;
+    
+    if (taskLink && taskLink !== "") {
+        if (confirm(`Open offer page to complete?`)) {
+            window.open(taskLink, '_blank');
+            showToast("Complete the offer, then come back and click Complete", "info");
+            return;
+        }
+    }
+    
+    const proof = prompt(`📸 Task: ${taskName}\n\nPaste your proof:`);
+    if (!proof) { showToast("Proof required!", "error"); return; }
+    
+    showLoading("Submitting...");
+    try {
+        await addDoc(collection(db, 'task_requests'), {
+            userId: currentUser.userId, userName: currentUser.name, taskId, taskName, reward, proof, taskLink,
+            status: 'pending', submittedAt: new Date().toISOString()
+        });
+        showToast("✅ Task submitted! Admin will verify.", "success");
+        addActivity(`📝 Submitted "${taskName}" for verification`);
+    } catch (error) { showToast("Failed!", "error"); }
+    hideLoading();
+};
+
+// ========== WITHDRAWAL REQUEST WITH BALANCE DEDUCTION ==========
+window.requestWithdrawal = async function() {
+    if (!currentUser) { showToast("Please login first!", "error"); return; }
+    
+    const amount = parseInt(document.getElementById('withdrawAmount')?.value);
+    const account = document.getElementById('accountNumber')?.value;
+    const method = selectedMethod;
+    
+    if (!method) { showToast("Select method!", "error"); return; }
+    if (!amount || amount < appSettings.minWithdrawal) { 
+        showToast(`Minimum withdrawal is ₨${appSettings.minWithdrawal}!`, "error"); 
+        return; 
+    }
+    if (!account) { showToast("Enter account!", "error"); return; }
+    if (amount > appData.balance) { showToast("Insufficient balance!", "error"); return; }
+    
+    showLoading("Submitting...");
+    try {
+        let methodDisplay = method === 'jazzcash' ? "JazzCash" : method === 'easypaisa' ? "EasyPaisa" : "UPaisa";
+        
+        // 🔥 SAVE WITHDRAWAL REQUEST
+        await addDoc(collection(db, 'withdrawal_requests'), {
+            userId: currentUser.userId, userName: currentUser.name, amount, method, methodDisplay, accountNumber: account,
+            status: 'pending', requestedAt: new Date().toISOString()
+        });
+        
+        // 🔥 DEDUCT BALANCE IMMEDIATELY
+        const userRef = doc(db, 'users', currentUser.userId);
+        await updateDoc(userRef, {
+            balance: increment(-amount)
+        });
+        
+        // 🔥 UPDATE LOCAL BALANCE
+        appData.balance -= amount;
+        updateUI();
+        
+        showToast(`✅ Withdrawal request of ₨${amount} submitted! Balance updated.`, "success");
+        addActivity(`💰 Withdrawal request of ₨${amount} submitted. New balance: ₨${appData.balance}`);
+        
+        // Clear form
+        document.getElementById('withdrawAmount').value = '';
+        document.getElementById('accountNumber').value = '';
+        document.querySelectorAll('.method-option').forEach(opt => opt.classList.remove('selected'));
+        selectedMethod = null;
+        
+        // Refresh withdrawal history if open
+        if (document.getElementById('withdrawHistoryScreen').classList.contains('active')) {
+            loadWithdrawalHistory();
+        }
+        
+    } catch (error) { 
+        console.error(error);
+        showToast("Failed to submit request!", "error"); 
+    }
+    hideLoading();
+};
+
+window.selectWithdrawalMethod = function(method) {
+    selectedMethod = method;
+    document.querySelectorAll('.method-option').forEach(opt => opt.classList.remove('selected'));
+    event.currentTarget.classList.add('selected');
+};
+
+async function loadWithdrawalHistory() {
+    if (!currentUser) return;
+    try {
+        const q = query(collection(db, 'withdrawal_requests'), where('userId', '==', currentUser.userId));
+        const snapshot = await getDocs(q);
+        allWithdrawals = [];
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            allWithdrawals.push({
+                id: doc.id, amount: data.amount, method: data.method, methodDisplay: data.methodDisplay,
+                accountNumber: data.accountNumber, status: data.status || 'pending',
+                requestedAt: data.requestedAt, date: data.requestedAt ? new Date(data.requestedAt).toLocaleDateString() : '-'
+            });
+        });
+        allWithdrawals.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+        renderWithdrawals();
+    } catch (error) { console.error(error); }
+}
+
+window.filterWithdrawals = function(status) {
+    currentFilter = status;
+    document.querySelectorAll('.history-tab').forEach(tab => {
+        tab.classList.remove('active');
+        if (tab.textContent.toLowerCase() === status) tab.classList.add('active');
+    });
+    renderWithdrawals();
+};
+
+function renderWithdrawals() {
+    const container = document.getElementById('withdrawalsList');
+    if (!container) return;
+    let filtered = allWithdrawals;
+    if (currentFilter !== 'all') filtered = allWithdrawals.filter(w => w.status === currentFilter);
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No withdrawal requests found</div>';
+        return;
+    }
+    container.innerHTML = filtered.map(w => `
+        <div class="withdrawal-card ${w.status}">
+            <div class="withdrawal-header">
+                <span class="withdrawal-amount">₨ ${w.amount}</span>
+                <span class="withdrawal-status status-${w.status}">${w.status}</span>
+            </div>
+            <div class="withdrawal-details">
+                <p><i class="fas fa-credit-card"></i> ${w.methodDisplay || w.method}</p>
+                <p><i class="fas fa-user"></i> Account: ${w.accountNumber}</p>
+                <p><i class="fas fa-calendar"></i> ${w.date}</p>
+            </div>
+        </div>
+    `).join('');
+}
+
+window.claimDailyBonus = async function() {
+    if (!currentUser) return;
+    const lastBonus = localStorage.getItem('lastBonus_' + currentUser.userId);
+    const today = new Date().toDateString();
+    if (lastBonus === today) { showToast("Already claimed today!", "error"); return; }
+    const bonus = 20 + (appData.streak * 2);
+    showLoading("Claiming...");
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+        const userRef = doc(db, 'users', currentUser.userId);
+        await updateDoc(userRef, { balance: increment(bonus), streak: increment(1) });
+        appData.balance += bonus; appData.streak++;
+        localStorage.setItem('lastBonus_' + currentUser.userId, today);
+        updateUI(); addActivity(`🎁 Claimed daily bonus of ₨${bonus}`);
+        showToast(`🎁 +₨${bonus} bonus!`, "success");
+    } catch (error) { showToast("Failed!", "error"); }
+    hideLoading();
+};
+
+window.watchAd = async function(type) {
+    if (!currentUser) { showToast("Please login first!", "error"); return; }
+    showToast("Ad system coming soon!", "info");
+};
+
+async function checkPendingItems() {
+    if (!currentUser) return;
+    try {
+        const q = query(collection(db, 'task_requests'), where('userId', '==', currentUser.userId), where('status', '==', 'approved'));
+        const snapshot = await getDocs(q);
+        for (const docSnap of snapshot.docs) {
+            const data = docSnap.data();
+            if (!appData.completedTasks.includes(data.taskId)) {
+                const userRef = doc(db, 'users', currentUser.userId);
+                await updateDoc(userRef, {
+                    balance: increment(data.reward),
+                    completedTasks: arrayUnion(data.taskId)
+                });
+                appData.balance += data.reward;
+                appData.completedTasks.push(data.taskId);
+                addActivity(`✅ Task "${data.taskName}" approved! +₨${data.reward}`);
+                updateUI(); loadTasks();
+            }
+        }
+    } catch (error) { console.error(error); }
+}
+
+function updateUI() {
+    document.getElementById('mainBalance').innerText = appData.balance;
+    document.getElementById('withdrawBalance').innerText = appData.balance;
+    document.getElementById('streakDays').innerText = appData.streak;
+    document.getElementById('referralsCount').innerText = appData.referrals;
+    document.getElementById('todayTasks').innerText = appData.completedTasks.length;
+    document.getElementById('referTotal').innerText = appData.referrals;
+    document.getElementById('referEarned').innerText = `₨ ${appData.referrals * 25}`;
+}
+
+function addActivity(message) {
+    const activity = { id: Date.now(), message, time: new Date().toLocaleTimeString() };
+    appData.activities.unshift(activity);
+    if (appData.activities.length > 20) appData.activities.pop();
+    updateActivities();
+}
+
+function updateActivities() {
+    const container = document.getElementById('activityList');
+    if (!container) return;
+    if (appData.activities.length === 0) { container.innerHTML = '<div style="text-align:center; padding:20px;">No activities yet</div>'; return; }
+    container.innerHTML = appData.activities.map(a => `<div class="activity-item"><i class="fas fa-history"></i><div><div>${a.message}</div><small>${a.time}</small></div></div>`).join('');
+}
+
+// ========== LOAD USER DATA WITH SETTINGS ==========
+async function loadUserData(userId) {
+    try {
+        // 🔥 LOAD SETTINGS FIRST
+        await loadSettings();
+        
+        const userRef = doc(db, 'users', userId);
+        const docSnap = await getDoc(userRef);
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            appData.balance = data.balance || 0;
+            appData.completedTasks = data.completedTasks || [];
+            appData.referrals = data.referrals || 0;
+            appData.streak = data.streak || 1;
+        }
+        updateUI(); await loadTasks(); checkPendingItems();
+    } catch (error) { console.error(error); }
+}
+
+window.loginUser = async function() {
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+    if (!email || !password) { showToast("Please fill all fields!", "error"); return; }
+    showLoading("Logging in...");
+    try {
+        const q = query(collection(db, 'users'), where('email', '==', email));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) { showToast("User not found!", "error"); hideLoading(); return; }
+        let userData = null;
+        snapshot.forEach(doc => { userData = doc.data(); });
+        if (btoa(password) !== userData.password) { showToast("Wrong password!", "error"); hideLoading(); return; }
+        currentUser = userData;
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        await loadUserData(currentUser.userId);
+        document.getElementById('authModal').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('userName').innerText = currentUser.name;
+        document.getElementById('referralLink').innerText = `https://kamaonow.com/ref/${currentUser.userId}`;
+        showToast(`✅ Welcome back, ${currentUser.name}!`, "success");
+    } catch (error) { showToast("Login failed!", "error"); }
+    hideLoading();
+};
+
+// ========== REGISTER WITH WELCOME BONUS FROM SETTINGS ==========
+window.registerUser = async function() {
+    const name = document.getElementById('regName').value;
+    const email = document.getElementById('regEmail').value;
+    const password = document.getElementById('regPassword').value;
+    const confirm = document.getElementById('regConfirmPassword').value;
+    if (!name || !email || !password) { showToast("Please fill all fields!", "error"); return; }
+    if (password !== confirm) { showToast("Passwords do not match!", "error"); return; }
+    if (password.length < 6) { showToast("Password must be at least 6 characters!", "error"); return; }
+    showLoading("Creating account...");
+    try {
+        // Load settings first to get welcome bonus
+        await loadSettings();
+        
+        const q = query(collection(db, 'users'), where('email', '==', email));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) { showToast("Email already registered!", "error"); hideLoading(); return; }
+        const userId = 'user_' + Date.now();
+        // 🔥 USING appSettings.welcomeBonus
+        await setDoc(doc(db, 'users', userId), {
+            userId, name, email, password: btoa(password), 
+            balance: appSettings.welcomeBonus, 
+            completedTasks: [],
+            referrals: 0, streak: 1, createdAt: new Date().toISOString(), status: 'active'
+        });
+        showToast(`✅ Registration successful! Welcome bonus: ₨${appSettings.welcomeBonus}`, "success");
+        switchAuthTab('login');
+        document.getElementById('regName').value = '';
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regPassword').value = '';
+        document.getElementById('regConfirmPassword').value = '';
+    } catch (error) { showToast("Registration failed!", "error"); }
+    hideLoading();
+};
+
 window.logoutUser = function() {
     localStorage.removeItem('currentUser');
     currentUser = null;
@@ -761,61 +472,36 @@ window.logoutUser = function() {
     showToast("Logged out successfully!", "success");
 };
 
-// ========== NAVIGATE TO FUNCTION (UPDATED) ==========
 window.navigateTo = function(screen) {
-    const screens = ['home', 'tasks', 'earn', 'withdraw', 'refer', 'withdrawHistory'];
-    screens.forEach(s => {
-        const el = document.getElementById(`${s}Screen`);
-        if (el) el.classList.remove('active');
-    });
+    const screens = ['home', 'tasks', 'earn', 'withdraw', 'withdrawHistory', 'refer'];
+    screens.forEach(s => { const el = document.getElementById(`${s}Screen`); if (el) el.classList.remove('active'); });
     document.getElementById(`${screen}Screen`).classList.add('active');
-    
-    if (screen === 'withdrawHistory') {
-        loadWithdrawalHistory();
-    }
-    
-    // 🔥 UPDATE REFERRAL LINK WHEN REFER SCREEN OPENS 🔥
-    if (screen === 'refer') {
-        updateReferralLink();
-    }
-    
+    if (screen === 'withdrawHistory') loadWithdrawalHistory();
+    if (screen === 'withdraw') updateWithdrawPageSettings(); // 🔥 Update withdraw page settings
     const navItems = document.querySelectorAll('.nav-item');
-    const screenMap = { home: 0, tasks: 1, earn: 2, withdraw: 3, withdrawHistory: 4, refer: 5 };
-    navItems.forEach((item, index) => {
-        if (index === screenMap[screen]) item.classList.add('active');
-        else item.classList.remove('active');
-    });
+    const map = { home: 0, tasks: 1, earn: 2, withdraw: 3, withdrawHistory: 4, refer: 5 };
+    navItems.forEach((item, i) => { if (i === map[screen]) item.classList.add('active'); else item.classList.remove('active'); });
 };
 
 window.switchAuthTab = function(tab) {
     const loginForm = document.getElementById('loginForm');
     const registerForm = document.getElementById('registerForm');
     const tabs = document.querySelectorAll('.tab-btn');
-    
     if (tab === 'login') {
-        loginForm.classList.add('active');
-        registerForm.classList.remove('active');
-        tabs[0].classList.add('active');
-        tabs[1].classList.remove('active');
+        loginForm.classList.add('active'); registerForm.classList.remove('active');
+        tabs[0].classList.add('active'); tabs[1].classList.remove('active');
     } else {
-        loginForm.classList.remove('active');
-        registerForm.classList.add('active');
-        tabs[0].classList.remove('active');
-        tabs[1].classList.add('active');
+        loginForm.classList.remove('active'); registerForm.classList.add('active');
+        tabs[0].classList.remove('active'); tabs[1].classList.add('active');
     }
 };
 
 window.copyReferralLink = function() {
-    if (!currentUser) {
-        showToast("Please login first to get your referral link!", "error");
-        return;
-    }
-    const link = `https://kamaonow.com/ref/${currentUser.userId}`;
-    navigator.clipboard.writeText(link);
-    showToast("Referral link copied! Share with friends!", "success");
+    if (!currentUser) { showToast("Please login first!", "error"); return; }
+    navigator.clipboard.writeText(`https://kamaonow.com/ref/${currentUser.userId}`);
+    showToast("Referral link copied!", "success");
 };
 
-// ========== CHECK SAVED USER ==========
 const savedUser = localStorage.getItem('currentUser');
 if (savedUser) {
     currentUser = JSON.parse(savedUser);
@@ -823,11 +509,7 @@ if (savedUser) {
     document.getElementById('appContainer').style.display = 'block';
     document.getElementById('userName').innerText = currentUser.name;
     loadUserData(currentUser.userId);
-    updateReferralLink(); // 🔥 ADDED
 }
 
-setInterval(() => {
-    if (currentUser) checkPendingItems();
-}, 30000);
-
-console.log("✅ KamaoNow Production Mode Ready - Referral Link Fixed!");
+setInterval(() => { if (currentUser) checkPendingItems(); }, 30000);
+console.log("✅ KamaoNow Ready with Settings Support!");
